@@ -1,0 +1,48 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": [
+    "config:recommended",
+    ":semanticCommits",
+    ":semanticCommitTypeAll(chore)",
+    ":dependencyDashboard",
+    ":automergeMinor",
+    ":automergeDigest",
+    "helpers:pinGitHubActionDigests"
+  ],
+  "timezone": "America/New_York",
+  "schedule": ["after 6am and before 9am every weekday", "every weekend"],
+  "prHourlyLimit": 4,
+  "prConcurrentLimit": 10,
+  "labels": ["dependencies", "automerge"],
+  "postUpdateOptions": ["gomodTidy", "gomodUpdateImportPaths"],
+  "packageRules": [
+    {
+      "description": "Group all GitHub Actions updates into a single PR",
+      "matchManagers": ["github-actions"],
+      "groupName": "github-actions",
+      "automerge": true
+    },
+    {
+      "description": "Group golangci-lint action with the linter version",
+      "matchPackageNames": [
+        "golangci/golangci-lint-action",
+        "golangci/golangci-lint"
+      ],
+      "groupName": "golangci-lint",
+      "automerge": true
+    },
+    {
+      "description": "Hold major Go module updates for review",
+      "matchManagers": ["gomod"],
+      "matchUpdateTypes": ["major"],
+      "automerge": false,
+      "labels": ["dependencies", "needs-review"]
+    },
+    {
+      "description": "Auto-merge minor and patch Go module updates",
+      "matchManagers": ["gomod"],
+      "matchUpdateTypes": ["minor", "patch"],
+      "automerge": true
+    }
+  ]
+}
