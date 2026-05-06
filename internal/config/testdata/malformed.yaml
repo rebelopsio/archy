@@ -1,0 +1,8 @@
+vault:
+  path: /tmp/x
+  folders:
+    daily: Daily
+:::: this is not valid YAML
+agent:
+  model: [unclosed
+
