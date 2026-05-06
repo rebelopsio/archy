@@ -48,6 +48,7 @@ linters:
         - G302 # writer PRD mandates 0o644 for vault notes (and chmod is the test instrument for the failure-cleanup test)
         - G304 # the writer's job is to read user-supplied vault paths; ErrPathEscape gates them
         - G306 # writer PRD mandates 0o644 vault notes (user-readable by design)
+        - G101 # archy stores env-var NAMES like "ARCHY_LINEAR_TOKEN" in config (per ADR-0006); these are identifiers, not credentials
 
   exclusions:
     paths:

@@ -542,3 +542,101 @@ func TestValidate_MultipleErrorsAllReported(t *testing.T) {
 	assert.Contains(t, msg, "output.default_write_mode")
 	assert.Contains(t, msg, "scoring.urgent_issue_weight")
 }
+
+// === BearerTokenEnv (per ADR-0006 / config-bearer-token PRD) ===
+
+func TestLoad_BearerTokenEnvParses(t *testing.T) {
+	clearArchyEnv(t)
+	t.Setenv("ARCHY_LINEAR_TOKEN", "fake-token-value")
+
+	dir := t.TempDir()
+	vault := t.TempDir()
+	yamlPath := filepath.Join(dir, "config.yaml")
+	writeYAML(t, yamlPath, `
+vault:
+  path: `+vault+`
+mcp_servers:
+  linear:
+    url: https://mcp.linear.app/mcp
+    enabled: true
+    bearer_token_env: ARCHY_LINEAR_TOKEN
+`)
+
+	cfg, err := Load(yamlPath)
+	require.NoError(t, err)
+	require.Contains(t, cfg.MCPServers, "linear")
+	assert.Equal(t, "ARCHY_LINEAR_TOKEN", cfg.MCPServers["linear"].BearerTokenEnv)
+}
+
+func TestLoad_BearerTokenEnvAbsentIsEmpty(t *testing.T) {
+	clearArchyEnv(t)
+	dir := t.TempDir()
+	vault := t.TempDir()
+	yamlPath := filepath.Join(dir, "config.yaml")
+	writeYAML(t, yamlPath, `
+vault:
+  path: `+vault+`
+mcp_servers:
+  linear:
+    url: https://mcp.linear.app/mcp
+    enabled: false
+`)
+	cfg, err := Load(yamlPath)
+	require.NoError(t, err)
+	assert.Empty(t, cfg.MCPServers["linear"].BearerTokenEnv)
+}
+
+func TestValidate_BearerTokenEnv_AcceptsWhenEnvSet(t *testing.T) {
+	t.Setenv("ARCHY_LINEAR_TOKEN", "fake-token-value")
+	cfg := validBaseline(t)
+	cfg.MCPServers = map[string]MCPServerConfig{
+		"linear": {URL: "https://mcp.linear.app/mcp", Enabled: true, BearerTokenEnv: "ARCHY_LINEAR_TOKEN"},
+	}
+	require.NoError(t, cfg.Validate())
+}
+
+func TestValidate_BearerTokenEnv_RejectsWhenEnvEmpty(t *testing.T) {
+	t.Setenv("ARCHY_LINEAR_TOKEN", "")
+	cfg := validBaseline(t)
+	cfg.MCPServers = map[string]MCPServerConfig{
+		"linear": {URL: "https://mcp.linear.app/mcp", Enabled: true, BearerTokenEnv: "ARCHY_LINEAR_TOKEN"},
+	}
+	err := cfg.Validate()
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, ErrInvalidConfig))
+	assert.Contains(t, err.Error(), "ARCHY_LINEAR_TOKEN")
+	assert.Contains(t, err.Error(), "linear")
+}
+
+func TestValidate_BearerTokenEnv_DisabledServerSkipped(t *testing.T) {
+	t.Setenv("ARCHY_LINEAR_TOKEN", "")
+	cfg := validBaseline(t)
+	cfg.MCPServers = map[string]MCPServerConfig{
+		"linear": {URL: "https://mcp.linear.app/mcp", Enabled: false, BearerTokenEnv: "ARCHY_LINEAR_TOKEN"},
+	}
+	require.NoError(t, cfg.Validate())
+}
+
+func TestValidate_BearerTokenEnv_EmptyOnEnabledServerOK(t *testing.T) {
+	cfg := validBaseline(t)
+	cfg.MCPServers = map[string]MCPServerConfig{
+		// Enabled server, no bearer-token-env set — providers that don't
+		// require auth (or are configured elsewhere) are valid.
+		"some-public-mcp": {URL: "https://example.com/mcp", Enabled: true},
+	}
+	require.NoError(t, cfg.Validate())
+}
+
+func TestValidate_BearerTokenEnv_MultipleProvidersMixed(t *testing.T) {
+	t.Setenv("ARCHY_LINEAR_TOKEN", "linear-token")
+	// GitHub deliberately has no BearerTokenEnv — exercises the
+	// "enabled but no auth field" branch alongside the "enabled with
+	// auth" and "disabled with auth" branches.
+	cfg := validBaseline(t)
+	cfg.MCPServers = map[string]MCPServerConfig{
+		"linear": {URL: "https://mcp.linear.app/mcp", Enabled: true, BearerTokenEnv: "ARCHY_LINEAR_TOKEN"},
+		"github": {URL: "https://api.githubcopilot.com/mcp/", Enabled: true},
+		"slack":  {URL: "https://example.com/slack", Enabled: false, BearerTokenEnv: "UNSET_BUT_DISABLED"},
+	}
+	require.NoError(t, cfg.Validate())
+}

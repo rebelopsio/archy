@@ -62,6 +62,18 @@ type MCPServerConfig struct {
 	URL string `mapstructure:"url"`
 	// Enabled toggles the server. Disabled servers are not validated.
 	Enabled bool `mapstructure:"enabled"`
+	// BearerTokenEnv names the environment variable holding the
+	// provider's bearer token (a personal access token or OAuth access
+	// token). archy reads the env var at startup and uses the value as
+	// "Authorization: Bearer <value>" for both archy's direct Go MCP
+	// client (orchestrator path, per ADR-0006) and the agent SDK's MCP
+	// server config (skill path).
+	//
+	// Optional. A provider that does not require authentication can
+	// leave this empty. If set on an enabled server, the named env
+	// variable must be non-empty at validation time; the validator
+	// rejects "set but empty" misconfigurations at startup.
+	BearerTokenEnv string `mapstructure:"bearer_token_env,omitempty"`
 }
 
 // SkillsConfig points to the directories archy discovers skills from.
@@ -334,6 +346,18 @@ func (c *Config) validateMCPServers(errs *[]error) {
 		u, err := url.Parse(srv.URL)
 		if err != nil || (u.Scheme != "http" && u.Scheme != "https") {
 			*errs = append(*errs, fmt.Errorf("mcp_servers[%q].url %q must use http or https scheme: %w", name, srv.URL, ErrInvalidConfig))
+		}
+
+		// Bearer-token env-var presence check. This is unusual for a
+		// validator (which is otherwise a pure function of the config),
+		// but catching this misconfiguration at startup avoids a
+		// confusing mid-run failure when archy tries to authenticate.
+		// Documented as deliberate so future readers do not "purify" it.
+		if srv.BearerTokenEnv != "" && os.Getenv(srv.BearerTokenEnv) == "" {
+			*errs = append(*errs, fmt.Errorf(
+				"mcp_servers[%q]: bearer_token_env %q is set, but the named env var is empty: %w",
+				name, srv.BearerTokenEnv, ErrInvalidConfig,
+			))
 		}
 	}
 }
