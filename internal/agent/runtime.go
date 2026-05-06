@@ -69,6 +69,10 @@ func New(opts Options) (*Runtime, error) {
 		opts.ArchyBinaryPath = exe
 	}
 
+	if _, err := buildOptions(opts.Config, opts); err != nil {
+		return nil, err
+	}
+
 	return &Runtime{
 		cfg:    opts.Config,
 		opts:   opts,
