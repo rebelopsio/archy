@@ -19,6 +19,13 @@ func (s *Server) registerTools() {
 		Name:        "archy_read_vault_note",
 		Description: "Read the contents of a note in the user's vault.",
 	}, s.handleReadVaultNote)
+
+	mcp.AddTool(s.mcp, &mcp.Tool{
+		Name: "archy_score_items",
+		Description: "Rank a list of items (issues, pull requests, calendar events) " +
+			"by computed priority. Returns scored items in descending order with " +
+			"per-signal explanations.",
+	}, s.handleScoreItems)
 }
 
 // toolError returns a [mcp.CallToolResult] marking the tool call as

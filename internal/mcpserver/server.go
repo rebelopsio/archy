@@ -3,6 +3,7 @@ package mcpserver
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
@@ -26,6 +27,9 @@ const serverVersion = "0.1.0"
 type Server struct {
 	cfg Config
 	mcp *mcp.Server
+
+	// now is overridable for tests via [setNow]; defaults to time.Now in [New].
+	now func() time.Time
 }
 
 // Config configures a [Server]. All required fields must be set.
@@ -71,6 +75,7 @@ func New(cfg Config) (*Server, error) {
 	s := &Server{
 		cfg: cfg,
 		mcp: mcp.NewServer(&mcp.Implementation{Name: ServerName, Version: serverVersion}, nil),
+		now: time.Now,
 	}
 	s.registerTools()
 	return s, nil
@@ -104,3 +109,8 @@ func (s *Server) Serve(ctx context.Context, transport mcp.Transport) error {
 func NewStdioTransport() mcp.Transport {
 	return &mcp.StdioTransport{}
 }
+
+// setNow overrides the clock used by time-dependent tools. Tests in the
+// same package use this to make assertions deterministic; production
+// callers never call it (the field defaults to time.Now in [New]).
+func (s *Server) setNow(fn func() time.Time) { s.now = fn }
