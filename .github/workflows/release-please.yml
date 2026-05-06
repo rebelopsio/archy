@@ -1,0 +1,31 @@
+name: release-please
+
+# Limitation: workflows triggered by a tag this job creates will not run.
+# GitHub does not re-trigger workflows from refs created via GITHUB_TOKEN.
+# This is acceptable today because we do not have a post-release workflow
+# (e.g., binary builds). When we add one, switch to a PAT or GitHub App
+# token here so the new workflow fires on the release tag.
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: release-please-${{ github.ref }}
+  # Release PRs accumulate edits across runs; cancelling mid-update would
+  # leave the PR in an inconsistent state.
+  cancel-in-progress: false
+
+jobs:
+  release-please:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: googleapis/release-please-action@v5
+        with:
+          config-file: .github/release-please-config.json
+          manifest-file: .github/.release-please-manifest.json
