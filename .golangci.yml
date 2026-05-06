@@ -36,6 +36,14 @@ linters:
         # mandates 0o755 directories and reading user-supplied paths as
         # the package's purpose. gosec's defaults assume web-server
         # threat models that don't apply here.
+        #
+        # G304 also appears as a //nolint annotation in
+        # internal/mcpserver/read_tool.go on os.ReadFile. That call
+        # operates only on paths previously validated by resolveReadPath
+        # (which mirrors the writer's vault-root escape check); the
+        # invariant is the same as the writer's. Future maintainers
+        # should not "fix" the nolint without first replacing the
+        # invariant.
         - G301 # writer PRD mandates 0o755 for vault parent directories
         - G302 # writer PRD mandates 0o644 for vault notes (and chmod is the test instrument for the failure-cleanup test)
         - G304 # the writer's job is to read user-supplied vault paths; ErrPathEscape gates them
