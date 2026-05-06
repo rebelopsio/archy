@@ -1,0 +1,52 @@
+version: "2"
+
+run:
+  timeout: 5m
+
+linters:
+  default: none
+  enable:
+    - errcheck
+    - govet
+    - ineffassign
+    - staticcheck
+    - unused
+    - misspell
+    - revive
+    - gosec
+    - bodyclose
+    - copyloopvar
+    - prealloc
+
+  settings:
+    revive:
+      rules:
+        - name: exported
+        - name: error-return
+        - name: error-naming
+        - name: package-comments
+        - name: var-declaration
+        - name: unused-parameter
+          disabled: true # noisy; we want named params for documentation
+    gosec:
+      excludes:
+        - G104 # unhandled errors — errcheck handles this with better output
+        # The following four are exclusions for archy's vault-writer
+        # use case. The writer PRD (docs/prd/vault-writer.md) explicitly
+        # mandates 0o755 directories and reading user-supplied paths as
+        # the package's purpose. gosec's defaults assume web-server
+        # threat models that don't apply here.
+        - G301 # writer PRD mandates 0o755 for vault parent directories
+        - G302 # writer PRD mandates 0o644 for vault notes (and chmod is the test instrument for the failure-cleanup test)
+        - G304 # the writer's job is to read user-supplied vault paths; ErrPathEscape gates them
+        - G306 # writer PRD mandates 0o644 vault notes (user-readable by design)
+
+  exclusions:
+    paths:
+      - testdata
+      - examples
+
+formatters:
+  enable:
+    - gofmt
+    - goimports

@@ -1,0 +1,30 @@
+name: lint
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+permissions:
+  contents: read
+  # pull-requests: read  # only needed if we enable only-new-issues
+
+concurrency:
+  group: lint-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  golangci-lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          # The lint action manages its own cache; disable Go's to avoid
+          # double-caching and the warnings that come with it.
+          cache: false
+      - uses: golangci/golangci-lint-action@v9
+        with:
+          version: v2.12
