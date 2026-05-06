@@ -1,0 +1,47 @@
+# archy CI: build, vet, and race-tested unit tests.
+#
+# Linux-only by design. archy targets Linux and macOS, but Linux alone
+# exercises the writer's filesystem semantics adequately and macOS would
+# double CI minutes for no meaningful additional coverage. Add a macOS
+# job in a follow-up if real macOS-specific issues appear.
+name: ci
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: go build
+        run: go build ./...
+      - name: go vet
+        run: go vet ./...
+
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+      # -race is mandatory: the writer claims concurrent-write safety in
+      # its tests and CI is what proves the claim.
+      - name: go test -race
+        run: go test -race -timeout=2m ./...
