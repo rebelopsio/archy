@@ -1,6 +1,11 @@
 package scoring
 
-import "time"
+import (
+	"sort"
+	"time"
+
+	"github.com/rebelopsio/archy/internal/domain"
+)
 
 // Weights configures how much each signal contributes when triggered.
 // All weights must be non-negative; zero disables the signal but still
@@ -50,6 +55,20 @@ func DefaultThresholds() Thresholds {
 	}
 }
 
+// resolved returns t with any zero fields replaced by [DefaultThresholds].
+// Allows callers to override one threshold without setting both.
+func (t Thresholds) resolved() Thresholds {
+	d := DefaultThresholds()
+	out := t
+	if out.MeetingSoonWindow == 0 {
+		out.MeetingSoonWindow = d.MeetingSoonWindow
+	}
+	if out.StaleAfter == 0 {
+		out.StaleAfter = d.StaleAfter
+	}
+	return out
+}
+
 // Context bundles the data signals need that isn't on the items themselves.
 // Construct one per scoring run.
 type Context struct {
@@ -69,4 +88,47 @@ type Context struct {
 	// scores — callers should usually populate Weights from config.
 	Weights    Weights
 	Thresholds Thresholds
+}
+
+// Score computes a single [domain.PriorityScore] for one item. The
+// returned PriorityScore.Signals always contains an entry for every
+// signal applicable to the item's type — fired or not — so callers can
+// render full explanations.
+func Score(ctx Context, item Item) domain.PriorityScore {
+	defs := signalsFor(item)
+	signals := make([]domain.ScoreSignal, 0, len(defs))
+	total := 0
+	for _, def := range defs {
+		triggered, reason := def.fn(ctx, item)
+		w := def.weight(ctx.Weights)
+		signals = append(signals, domain.ScoreSignal{
+			Name:      def.name,
+			Weight:    w,
+			Triggered: triggered,
+			Reason:    reason,
+		})
+		if triggered {
+			total += w
+		}
+	}
+	return domain.PriorityScore{
+		Ref:        item.Ref(),
+		Score:      total,
+		Signals:    signals,
+		ComputedAt: ctx.Now,
+	}
+}
+
+// ScoreAll computes scores for a slice of items, returning them sorted
+// descending by Score. Ties preserve input order (sort.SliceStable).
+// An empty input returns an empty (non-nil) slice.
+func ScoreAll(ctx Context, items []Item) []domain.PriorityScore {
+	out := make([]domain.PriorityScore, 0, len(items))
+	for _, item := range items {
+		out = append(out, Score(ctx, item))
+	}
+	sort.SliceStable(out, func(i, j int) bool {
+		return out[i].Score > out[j].Score
+	})
+	return out
 }

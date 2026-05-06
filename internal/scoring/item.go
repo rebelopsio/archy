@@ -51,3 +51,19 @@ type CalendarEventItem struct {
 func (e CalendarEventItem) Ref() domain.ExternalRef { return e.Event.Ref }
 
 func (CalendarEventItem) applies(sealed) {}
+
+// signalsFor returns the applicable signals for an item, in stable order.
+// Returns nil for an unrecognized concrete type — the engine treats this
+// as "no applicable signals."
+func signalsFor(item Item) []signalDef {
+	switch item.(type) {
+	case IssueItem:
+		return signalsForIssue
+	case PullRequestItem:
+		return signalsForPR
+	case CalendarEventItem:
+		return signalsForEvent
+	default:
+		return nil
+	}
+}
