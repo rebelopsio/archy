@@ -3,6 +3,7 @@ package config
 import (
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -120,11 +121,10 @@ type OutputConfig struct {
 }
 
 // Load reads the config from path, applies defaults, applies environment
-// variable overrides, and returns a Config. Returns ErrConfigNotFound
-// (wrapped) when the file does not exist and ErrConfigParse (wrapped)
-// when the YAML is malformed.
-//
-// Validation will be wired in via Config.Validate in a subsequent commit.
+// variable overrides, validates, and returns a Config. Returns
+// ErrConfigNotFound (wrapped) when the file does not exist,
+// ErrConfigParse (wrapped) when the YAML is malformed, and
+// ErrInvalidConfig (wrapped) when validation fails.
 func Load(path string) (*Config, error) {
 	v := newViper()
 
@@ -147,8 +147,8 @@ func Load(path string) (*Config, error) {
 // $XDG_CONFIG_HOME/archy/config.yaml on Linux (or ~/.config/archy/config.yaml
 // when XDG_CONFIG_HOME is unset), ~/Library/Application Support/archy/config.yaml
 // on macOS. If the file does not exist, returns a Config populated entirely
-// from defaults (and any ARCHY_ env-var overrides). Returns an error only on
-// I/O or parse failure.
+// from defaults (and any ARCHY_ env-var overrides) and validates it. Returns
+// an error only on I/O, parse, or validation failure.
 func LoadDefault() (*Config, error) {
 	cfgDir, err := os.UserConfigDir()
 	if err != nil {
@@ -186,14 +186,17 @@ func newViper() *viper.Viper {
 	return v
 }
 
-// finalize unmarshals v into a Config and expands tildes in path-bearing
-// fields. Validation is added in a subsequent commit.
+// finalize unmarshals v into a Config, expands tildes in path-bearing
+// fields, and validates.
 func finalize(v *viper.Viper) (*Config, error) {
 	var cfg Config
 	if err := v.Unmarshal(&cfg); err != nil {
 		return nil, fmt.Errorf("unmarshal config: %w", err)
 	}
 	if err := expandConfigTildes(&cfg); err != nil {
+		return nil, err
+	}
+	if err := cfg.Validate(); err != nil {
 		return nil, err
 	}
 	return &cfg, nil
@@ -271,4 +274,125 @@ func expandTilde(path string) (string, error) {
 		return filepath.Join(home, path[2:]), nil
 	}
 	return path, nil
+}
+
+// Validate returns an error if c is not a usable configuration. All
+// validation failures are collected and joined via errors.Join so callers
+// see every problem at once. Each underlying error wraps ErrInvalidConfig.
+func (c *Config) Validate() error {
+	var errs []error
+
+	c.validateVault(&errs)
+	c.validateMCPServers(&errs)
+	c.validateSkills(&errs)
+	c.validateAgent(&errs)
+	c.validateScoring(&errs)
+	c.validateState(&errs)
+	c.validateOutput(&errs)
+
+	return errors.Join(errs...)
+}
+
+func (c *Config) validateVault(errs *[]error) {
+	if c.Vault.Path == "" {
+		*errs = append(*errs, fmt.Errorf("vault.path is required: %w", ErrInvalidConfig))
+	} else if info, err := os.Stat(c.Vault.Path); err != nil {
+		*errs = append(*errs, fmt.Errorf("vault.path %q does not exist: %w", c.Vault.Path, ErrInvalidConfig))
+	} else if !info.IsDir() {
+		*errs = append(*errs, fmt.Errorf("vault.path %q is not a directory: %w", c.Vault.Path, ErrInvalidConfig))
+	}
+
+	folders := []struct {
+		name, val string
+	}{
+		{"daily", c.Vault.Folders.Daily},
+		{"meetings", c.Vault.Folders.Meetings},
+		{"triage", c.Vault.Folders.Triage},
+		{"reviews", c.Vault.Folders.Reviews},
+		{"inbox", c.Vault.Folders.Inbox},
+	}
+	for _, f := range folders {
+		if f.val == "" {
+			*errs = append(*errs, fmt.Errorf("vault.folders.%s is empty: %w", f.name, ErrInvalidConfig))
+			continue
+		}
+		if strings.Contains(f.val, "..") || strings.ContainsAny(f.val, `/\`) {
+			*errs = append(*errs, fmt.Errorf("vault.folders.%s %q must not contain path separators or '..': %w", f.name, f.val, ErrInvalidConfig))
+		}
+	}
+}
+
+func (c *Config) validateMCPServers(errs *[]error) {
+	for name, srv := range c.MCPServers {
+		if !srv.Enabled {
+			continue
+		}
+		if srv.URL == "" {
+			*errs = append(*errs, fmt.Errorf("mcp_servers[%q].url is required when enabled: %w", name, ErrInvalidConfig))
+			continue
+		}
+		u, err := url.Parse(srv.URL)
+		if err != nil || (u.Scheme != "http" && u.Scheme != "https") {
+			*errs = append(*errs, fmt.Errorf("mcp_servers[%q].url %q must use http or https scheme: %w", name, srv.URL, ErrInvalidConfig))
+		}
+	}
+}
+
+func (c *Config) validateSkills(errs *[]error) {
+	if c.Skills.ProjectDir == "" {
+		*errs = append(*errs, fmt.Errorf("skills.project_dir is empty: %w", ErrInvalidConfig))
+	}
+	if c.Skills.UserDir == "" {
+		*errs = append(*errs, fmt.Errorf("skills.user_dir is empty: %w", ErrInvalidConfig))
+	}
+}
+
+func (c *Config) validateAgent(errs *[]error) {
+	if c.Agent.Model == "" {
+		*errs = append(*errs, fmt.Errorf("agent.model is empty: %w", ErrInvalidConfig))
+	}
+	if c.Agent.MaxTurns <= 0 {
+		*errs = append(*errs, fmt.Errorf("agent.max_turns must be > 0, got %d: %w", c.Agent.MaxTurns, ErrInvalidConfig))
+	}
+	switch c.Agent.PermissionMode {
+	case "default", "acceptEdits", "bypassPermissions":
+	default:
+		*errs = append(*errs, fmt.Errorf("agent.permission_mode %q must be one of default, acceptEdits, bypassPermissions: %w", c.Agent.PermissionMode, ErrInvalidConfig))
+	}
+}
+
+func (c *Config) validateScoring(errs *[]error) {
+	weights := []struct {
+		name string
+		val  int
+	}{
+		{"meeting_soon_weight", c.Scoring.MeetingSoonWeight},
+		{"urgent_issue_weight", c.Scoring.UrgentIssueWeight},
+		{"review_requested_weight", c.Scoring.ReviewRequestedWeight},
+	}
+	for _, w := range weights {
+		if w.val < 0 {
+			*errs = append(*errs, fmt.Errorf("scoring.%s must be >= 0, got %d: %w", w.name, w.val, ErrInvalidConfig))
+		}
+	}
+}
+
+func (c *Config) validateState(errs *[]error) {
+	if c.State.SQLitePath == "" {
+		*errs = append(*errs, fmt.Errorf("state.sqlite_path is empty: %w", ErrInvalidConfig))
+	}
+	if c.State.CacheTTL < 0 {
+		*errs = append(*errs, fmt.Errorf("state.cache_ttl must be >= 0, got %s: %w", c.State.CacheTTL, ErrInvalidConfig))
+	}
+}
+
+func (c *Config) validateOutput(errs *[]error) {
+	switch c.Output.DefaultWriteMode {
+	case "marker-block", "overwrite", "append":
+	default:
+		*errs = append(*errs, fmt.Errorf("output.default_write_mode %q must be one of marker-block, overwrite, append: %w", c.Output.DefaultWriteMode, ErrInvalidConfig))
+	}
+	if _, err := time.LoadLocation(c.Output.Timezone); err != nil {
+		*errs = append(*errs, fmt.Errorf("output.timezone %q is not loadable via time.LoadLocation: %w", c.Output.Timezone, ErrInvalidConfig))
+	}
 }
