@@ -14,6 +14,11 @@ func (s *Server) registerTools() {
 			"Use marker-block mode (default) to update only archy-managed regions of files. " +
 			"Use overwrite or append for capture-style workflows.",
 	}, s.handleWriteVaultNote)
+
+	mcp.AddTool(s.mcp, &mcp.Tool{
+		Name:        "archy_read_vault_note",
+		Description: "Read the contents of a note in the user's vault.",
+	}, s.handleReadVaultNote)
 }
 
 // toolError returns a [mcp.CallToolResult] marking the tool call as
