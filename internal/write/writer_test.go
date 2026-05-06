@@ -1,0 +1,305 @@
+package write
+
+import (
+	"context"
+	"errors"
+	"os"
+	"path/filepath"
+	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+)
+
+func newTestWriter(t *testing.T) (*Writer, string) {
+	t.Helper()
+	dir := t.TempDir()
+	w, err := New(dir)
+	require.NoError(t, err)
+	return w, dir
+}
+
+func writeFile(t *testing.T, path, content string) {
+	t.Helper()
+	require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o755))
+	require.NoError(t, os.WriteFile(path, []byte(content), 0o644))
+}
+
+func readFile(t *testing.T, path string) string {
+	t.Helper()
+	b, err := os.ReadFile(path)
+	require.NoError(t, err)
+	return string(b)
+}
+
+func TestWriter_Write_NewFile_Frontmatter(t *testing.T) {
+	w, dir := newTestWriter(t)
+	res, err := w.Write(context.Background(), Note{
+		Path:     "note.md",
+		Mode:     ModeMarkerBlock,
+		MarkerID: "daily-brief",
+		Content:  "hello world",
+		Frontmatter: map[string]any{
+			"title": "Daily Brief",
+			"tag":   "demo",
+		},
+	})
+	require.NoError(t, err)
+	assert.Equal(t, filepath.Join(dir, "note.md"), res.Path)
+	assert.True(t, res.Created)
+	assert.True(t, res.BlockAdded)
+	assert.False(t, res.BlockUpdated)
+
+	expected := "---\ntag: demo\ntitle: Daily Brief\n---\n\n<!-- archy:start id=daily-brief -->\nhello world\n<!-- archy:end -->\n"
+	assert.Equal(t, expected, readFile(t, res.Path))
+	assert.Equal(t, len(expected), res.BytesWritten)
+}
+
+func TestWriter_Write_NewFile_NoFrontmatter(t *testing.T) {
+	w, dir := newTestWriter(t)
+	res, err := w.Write(context.Background(), Note{
+		Path:     "note.md",
+		Mode:     ModeMarkerBlock,
+		MarkerID: "daily-brief",
+		Content:  "hi",
+	})
+	require.NoError(t, err)
+	assert.Equal(t, filepath.Join(dir, "note.md"), res.Path)
+	assert.True(t, res.Created)
+	assert.True(t, res.BlockAdded)
+
+	expected := "<!-- archy:start id=daily-brief -->\nhi\n<!-- archy:end -->\n"
+	assert.Equal(t, expected, readFile(t, res.Path))
+}
+
+func TestWriter_Write_ExistingFile_NoMarkerBlock_Appends(t *testing.T) {
+	w, dir := newTestWriter(t)
+	target := filepath.Join(dir, "note.md")
+	writeFile(t, target, "# heading\n\nsome paragraph.\n")
+
+	res, err := w.Write(context.Background(), Note{
+		Path:     "note.md",
+		Mode:     ModeMarkerBlock,
+		MarkerID: "daily-brief",
+		Content:  "today",
+	})
+	require.NoError(t, err)
+	assert.False(t, res.Created)
+	assert.True(t, res.BlockAdded)
+	assert.False(t, res.BlockUpdated)
+
+	expected := "# heading\n\nsome paragraph.\n\n<!-- archy:start id=daily-brief -->\ntoday\n<!-- archy:end -->\n"
+	assert.Equal(t, expected, readFile(t, target))
+}
+
+func TestWriter_Write_ExistingMarkerBlock_SameID_Replaces(t *testing.T) {
+	w, dir := newTestWriter(t)
+	target := filepath.Join(dir, "note.md")
+	original := "preface\n\n<!-- archy:start id=daily-brief -->\nold content\n<!-- archy:end -->\n\nfooter\n"
+	writeFile(t, target, original)
+
+	res, err := w.Write(context.Background(), Note{
+		Path:     "note.md",
+		Mode:     ModeMarkerBlock,
+		MarkerID: "daily-brief",
+		Content:  "new content",
+	})
+	require.NoError(t, err)
+	assert.False(t, res.Created)
+	assert.False(t, res.BlockAdded)
+	assert.True(t, res.BlockUpdated)
+
+	expected := "preface\n\n<!-- archy:start id=daily-brief -->\nnew content\n<!-- archy:end -->\n\nfooter\n"
+	assert.Equal(t, expected, readFile(t, target))
+}
+
+func TestWriter_Write_ExistingMarkerBlock_DifferentID_AppendsNew(t *testing.T) {
+	w, dir := newTestWriter(t)
+	target := filepath.Join(dir, "note.md")
+	original := "<!-- archy:start id=alpha -->\nA\n<!-- archy:end -->\n"
+	writeFile(t, target, original)
+
+	res, err := w.Write(context.Background(), Note{
+		Path:     "note.md",
+		Mode:     ModeMarkerBlock,
+		MarkerID: "beta",
+		Content:  "B",
+	})
+	require.NoError(t, err)
+	assert.True(t, res.BlockAdded)
+	assert.False(t, res.BlockUpdated)
+
+	expected := "<!-- archy:start id=alpha -->\nA\n<!-- archy:end -->\n\n<!-- archy:start id=beta -->\nB\n<!-- archy:end -->\n"
+	assert.Equal(t, expected, readFile(t, target))
+}
+
+func TestWriter_Write_TwoBlocks_ReplaceOne_LeavesOther(t *testing.T) {
+	w, dir := newTestWriter(t)
+	target := filepath.Join(dir, "note.md")
+	original := "<!-- archy:start id=alpha -->\nA1\n<!-- archy:end -->\n\n<!-- archy:start id=beta -->\nB1\n<!-- archy:end -->\n"
+	writeFile(t, target, original)
+
+	_, err := w.Write(context.Background(), Note{
+		Path:     "note.md",
+		Mode:     ModeMarkerBlock,
+		MarkerID: "alpha",
+		Content:  "A2",
+	})
+	require.NoError(t, err)
+
+	expected := "<!-- archy:start id=alpha -->\nA2\n<!-- archy:end -->\n\n<!-- archy:start id=beta -->\nB1\n<!-- archy:end -->\n"
+	assert.Equal(t, expected, readFile(t, target))
+}
+
+func TestWriter_Write_DuplicateMarker_ErrorsAndDoesNotWrite(t *testing.T) {
+	w, dir := newTestWriter(t)
+	target := filepath.Join(dir, "note.md")
+	original := "<!-- archy:start id=foo -->\none\n<!-- archy:end -->\n<!-- archy:start id=foo -->\ntwo\n<!-- archy:end -->\n"
+	writeFile(t, target, original)
+
+	_, err := w.Write(context.Background(), Note{
+		Path:     "note.md",
+		Mode:     ModeMarkerBlock,
+		MarkerID: "foo",
+		Content:  "ignored",
+	})
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, ErrDuplicateMarker), "expected ErrDuplicateMarker, got %v", err)
+	assert.Equal(t, original, readFile(t, target), "file should be unchanged")
+}
+
+func TestWriter_Write_Overwrite(t *testing.T) {
+	w, dir := newTestWriter(t)
+	target := filepath.Join(dir, "note.md")
+	writeFile(t, target, "old\nstuff\n")
+
+	res, err := w.Write(context.Background(), Note{
+		Path:    "note.md",
+		Mode:    ModeOverwrite,
+		Content: "totally new content",
+	})
+	require.NoError(t, err)
+	assert.False(t, res.Created)
+	assert.Equal(t, "totally new content\n", readFile(t, target))
+}
+
+func TestWriter_Write_Overwrite_CreatesNewFile(t *testing.T) {
+	w, dir := newTestWriter(t)
+	res, err := w.Write(context.Background(), Note{
+		Path:    "fresh.md",
+		Mode:    ModeOverwrite,
+		Content: "hello",
+	})
+	require.NoError(t, err)
+	assert.True(t, res.Created)
+	assert.Equal(t, "hello\n", readFile(t, filepath.Join(dir, "fresh.md")))
+}
+
+func TestWriter_Write_Append_NewFile(t *testing.T) {
+	w, dir := newTestWriter(t)
+	res, err := w.Write(context.Background(), Note{
+		Path:    "log.md",
+		Mode:    ModeAppend,
+		Content: "first entry\n",
+	})
+	require.NoError(t, err)
+	assert.True(t, res.Created)
+	assert.Equal(t, "first entry\n", readFile(t, filepath.Join(dir, "log.md")))
+}
+
+func TestWriter_Write_Append_ExistingWithTrailingNewline(t *testing.T) {
+	w, dir := newTestWriter(t)
+	target := filepath.Join(dir, "log.md")
+	writeFile(t, target, "first\n")
+
+	_, err := w.Write(context.Background(), Note{
+		Path:    "log.md",
+		Mode:    ModeAppend,
+		Content: "second\n",
+	})
+	require.NoError(t, err)
+	assert.Equal(t, "first\nsecond\n", readFile(t, target))
+}
+
+func TestWriter_Write_Append_ExistingWithoutTrailingNewline(t *testing.T) {
+	w, dir := newTestWriter(t)
+	target := filepath.Join(dir, "log.md")
+	writeFile(t, target, "first")
+
+	_, err := w.Write(context.Background(), Note{
+		Path:    "log.md",
+		Mode:    ModeAppend,
+		Content: "second\n",
+	})
+	require.NoError(t, err)
+	assert.Equal(t, "first\nsecond\n", readFile(t, target))
+}
+
+func TestWriter_Write_InvalidMarkerID(t *testing.T) {
+	w, _ := newTestWriter(t)
+	note := Note{
+		Path:     "note.md",
+		Mode:     ModeMarkerBlock,
+		MarkerID: "bad id with space",
+		Content:  "hi",
+	}
+	require.True(t, errors.Is(note.Validate(), ErrInvalidMarkerID))
+
+	_, err := w.Write(context.Background(), note)
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, ErrInvalidMarkerID))
+}
+
+func TestWriter_Write_EmptyPath(t *testing.T) {
+	w, _ := newTestWriter(t)
+	_, err := w.Write(context.Background(), Note{
+		Path:     "",
+		Mode:     ModeMarkerBlock,
+		MarkerID: "foo",
+		Content:  "x",
+	})
+	require.Error(t, err)
+}
+
+func TestNew_NonexistentVaultRoot(t *testing.T) {
+	_, err := New("/this/does/not/exist/anywhere")
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, ErrVaultRootInvalid))
+}
+
+func TestNew_VaultRootIsFile(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "not-a-dir")
+	require.NoError(t, os.WriteFile(target, []byte("x"), 0o644))
+
+	_, err := New(target)
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, ErrVaultRootInvalid))
+}
+
+func TestNew_RelativePath(t *testing.T) {
+	_, err := New("relative/path")
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, ErrVaultRootInvalid))
+}
+
+func TestWriter_Frontmatter_IgnoredOnExistingFile(t *testing.T) {
+	w, dir := newTestWriter(t)
+	target := filepath.Join(dir, "note.md")
+	writeFile(t, target, "# pre-existing\n")
+
+	_, err := w.Write(context.Background(), Note{
+		Path:     "note.md",
+		Mode:     ModeMarkerBlock,
+		MarkerID: "x",
+		Content:  "body",
+		Frontmatter: map[string]any{
+			"title": "should not appear",
+		},
+	})
+	require.NoError(t, err)
+
+	got := readFile(t, target)
+	assert.NotContains(t, got, "title: should not appear")
+	assert.Contains(t, got, "# pre-existing")
+}
