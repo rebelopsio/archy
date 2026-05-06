@@ -36,3 +36,14 @@ These are one-time, human-driven steps. They are intentionally not automated —
 ## Auto-merge
 
 PRs labeled `automerge` are picked up by Kodiak once CI is green and approvals are satisfied. Renovate adds the label automatically; humans can add it manually for routine PRs.
+
+## Regenerating sqlc queries
+
+`internal/state/db/` is generated from `internal/state/schema.sql` and `internal/state/queries.sql` by [sqlc](https://sqlc.dev/). The generated code is committed; CI does not run sqlc. To regenerate after editing schema or queries:
+
+```sh
+go install github.com/sqlc-dev/sqlc/cmd/sqlc@latest
+cd internal/state && sqlc generate
+```
+
+Code review catches the case where queries change but the generated files don't.
