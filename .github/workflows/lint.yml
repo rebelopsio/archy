@@ -28,3 +28,18 @@ jobs:
       - uses: golangci/golangci-lint-action@v9
         with:
           version: v2.12
+
+  pre-commit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          # pre-commit caches its own hook environments; Go's separate
+          # build cache doesn't compose usefully with that.
+          cache: false
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - uses: pre-commit/action@v4.0.0
