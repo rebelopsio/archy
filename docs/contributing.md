@@ -18,6 +18,16 @@ Breaking changes use `!` after the type/scope (e.g., `feat(write)!: ...`) or a `
 
 PRs should be **squash-merged** so the resulting commit message on `main` follows the convention. Kodiak is configured to do this automatically; see below.
 
+### How conventional commits are enforced
+
+This repo uses squash-merge. The squash commit on `main` takes its message from the PR title — not from any commit on the feature branch. release-please reads commits on `main` to drive versioning and the changelog, so the PR title is the load-bearing input.
+
+PR titles are validated by [`.github/workflows/pr-title.yml`](../.github/workflows/pr-title.yml) using [`amannn/action-semantic-pull-request`](https://github.com/amannn/action-semantic-pull-request). The check runs on PR open, reopen, edit, and push. If your PR title doesn't match the conventional-commit spec, the check fails and the PR is blocked from merging.
+
+Per-commit messages on a feature branch are **not** validated. Use whatever message style you find readable during development; the squash will replace them with the PR title anyway.
+
+Accepted types: `feat`, `fix`, `chore`, `docs`, `test`, `refactor`, `ci`, `perf`, `style`, `revert`, `build`. Scope is optional. See [Conventional Commits](https://www.conventionalcommits.org/) for the full grammar.
+
 ## Repository setup checklist
 
 After cloning this repo or creating it fresh, configure the following once:
@@ -31,6 +41,7 @@ After cloning this repo or creating it fresh, configure the following once:
    - Require branches to be up to date before merging.
    - Require conversation resolution before merging.
 5. Confirm release-please's first PR appears after the next conventional commit lands on `main`. Merge it to bootstrap `v0.1.0`.
+6. After the `pr-title` workflow runs successfully on at least one PR, add `Validate PR title` to the required status checks for `main` in branch protection.
 
 These are one-time, human-driven steps. They are intentionally not automated — the credentials needed (admin token, app installations, PAT) are out of scope for the repo.
 
