@@ -1,0 +1,56 @@
+name: PR title
+
+# Validates the PR title against the conventional-commit spec.
+#
+# Why this is on CI rather than a local commit-msg hook: the repo
+# uses squash-merge with "Default to PR title for squash merge
+# commits" enabled, so the PR title becomes the commit message on
+# main. release-please reads main commits to drive versioning and
+# changelogs, which makes the PR title — not any per-commit message
+# on the feature branch — the load-bearing input. A local hook would
+# validate the wrong artifact.
+#
+# The accepted types list mirrors release-please's default
+# changelog-types. If .github/release-please-config.json ever sets a
+# custom changelog-types, this list must be updated to match.
+
+on:
+  pull_request_target:
+    types:
+      - opened
+      - reopened
+      - edited
+      - synchronize
+
+permissions:
+  pull-requests: read
+
+concurrency:
+  group: pr-title-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    name: Validate PR title
+    runs-on: ubuntu-latest
+    steps:
+      - uses: amannn/action-semantic-pull-request@v6
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          types: |
+            feat
+            fix
+            chore
+            docs
+            test
+            refactor
+            ci
+            perf
+            style
+            revert
+            build
+          # Single-commit PRs can squash with the commit message
+          # rather than the PR title in the GitHub UI; ensure the
+          # single commit also matches the spec.
+          validateSingleCommit: true
