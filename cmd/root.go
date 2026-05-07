@@ -18,73 +18,34 @@ limitations under the License.
 package cmd
 
 import (
-	"fmt"
 	"os"
 
 	"github.com/spf13/cobra"
-	"github.com/spf13/viper"
 )
 
-var cfgFile string
-
-// rootCmd represents the base command when called without any subcommands
+// rootCmd is the entry point for the archy binary. Subcommands register
+// themselves on it from sibling files (daily.go, mcp_server.go, version.go).
 var rootCmd = &cobra.Command{
 	Use:   "archy",
-	Short: "A brief description of your application",
-	Long: `A longer description that spans multiple lines and likely contains
-examples and usage of using your application. For example:
+	Short: "Personal AI assistant for a markdown vault",
+	Long: `archy is a personal AI assistant for managing a markdown vault from
+Neovim and the CLI. Built on the Claude Agent SDK, it orchestrates Linear,
+GitHub, Google Calendar, and other systems into structured Obsidian-vault
+notes — daily briefs, meeting prep, review queues, triage, capture — via
+composable Skills, MCP servers, and typed blocks.
 
-Cobra is a CLI library for Go that empowers applications.
-This application is a tool to generate the needed files
-to quickly create a Cobra application.`,
-	// Uncomment the following line if your bare application
-	// has an action associated with it:
-	// Run: func(cmd *cobra.Command, args []string) { },
+Configuration lives at $XDG_CONFIG_HOME/archy/config.yaml (or
+~/.config/archy/config.yaml when XDG_CONFIG_HOME is unset). Local state
+is kept in a SQLite database under $XDG_DATA_HOME/archy/state.db.
+
+See https://github.com/rebelopsio/archy for documentation.`,
 }
 
-// Execute adds all child commands to the root command and sets flags appropriately.
-// This is called by main.main(). It only needs to happen once to the rootCmd.
+// Execute runs the archy CLI. It is called by main.main() and exits the
+// process with a non-zero status if a subcommand returns an error.
+// Cobra prints the error itself before returning.
 func Execute() {
-	err := rootCmd.Execute()
-	if err != nil {
+	if err := rootCmd.Execute(); err != nil {
 		os.Exit(1)
-	}
-}
-
-func init() {
-	cobra.OnInitialize(initConfig)
-
-	// Here you will define your flags and configuration settings.
-	// Cobra supports persistent flags, which, if defined here,
-	// will be global for your application.
-
-	rootCmd.PersistentFlags().StringVar(&cfgFile, "config", "", "config file (default is $HOME/.archy.yaml)")
-
-	// Cobra also supports local flags, which will only run
-	// when this action is called directly.
-	rootCmd.Flags().BoolP("toggle", "t", false, "Help message for toggle")
-}
-
-// initConfig reads in config file and ENV variables if set.
-func initConfig() {
-	if cfgFile != "" {
-		// Use config file from the flag.
-		viper.SetConfigFile(cfgFile)
-	} else {
-		// Find home directory.
-		home, err := os.UserHomeDir()
-		cobra.CheckErr(err)
-
-		// Search config in home directory with name ".archy" (without extension).
-		viper.AddConfigPath(home)
-		viper.SetConfigType("yaml")
-		viper.SetConfigName(".archy")
-	}
-
-	viper.AutomaticEnv() // read in environment variables that match
-
-	// If a config file is found, read it in.
-	if err := viper.ReadInConfig(); err == nil {
-		fmt.Fprintln(os.Stderr, "Using config file:", viper.ConfigFileUsed())
 	}
 }
