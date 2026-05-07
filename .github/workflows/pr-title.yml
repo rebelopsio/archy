@@ -50,7 +50,8 @@ jobs:
             style
             revert
             build
-          # Single-commit PRs can squash with the commit message
-          # rather than the PR title in the GitHub UI; ensure the
-          # single commit also matches the spec.
-          validateSingleCommit: true
+          # validateSingleCommit is intentionally not set: the repo's
+          # squash_merge_commit_title is "PR_TITLE", so the PR title is
+          # always what lands on main, regardless of how many commits
+          # the feature branch has. There's no need to also constrain
+          # the commit message itself.
