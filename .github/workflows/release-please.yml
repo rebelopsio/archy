@@ -1,20 +1,16 @@
 name: release-please
 
-# Token note: this workflow uses RELEASE_PLEASE_TOKEN (a PAT) so that
-# pushes/PRs release-please makes trigger downstream workflows on the
-# resulting events. Workflows triggered by GITHUB_TOKEN (the default
-# bot identity) do NOT trigger other workflows — that means CI never
-# runs on release-please PRs, which blocks merging when branch
-# protection requires status checks.
+# Token: this workflow uses RELEASE_PLEASE_TOKEN (a PAT) so that
+# pushes and tags release-please makes trigger downstream workflows
+# on the resulting events. Workflows triggered by the default
+# GITHUB_TOKEN actor do NOT trigger other workflows — that means
+# release.yml (the binary-build pipeline) wouldn't fire on tags
+# release-please creates, and ci.yml/lint.yml wouldn't run on
+# release-please PRs.
 #
 # The PAT needs `contents: write` and `pull-requests: write` scopes
 # (or, for fine-grained tokens, the equivalent permissions). See
 # docs/contributing.md for setup.
-#
-# Falls back to GITHUB_TOKEN when RELEASE_PLEASE_TOKEN is not set so
-# release-please continues to work in a degraded state (PRs created
-# but missing CI) rather than breaking entirely. Add the secret to
-# unlock CI on the PRs.
 
 on:
   push:
@@ -37,6 +33,6 @@ jobs:
     steps:
       - uses: googleapis/release-please-action@v5
         with:
-          token: ${{ secrets.RELEASE_PLEASE_TOKEN || secrets.GITHUB_TOKEN }}
+          token: ${{ secrets.RELEASE_PLEASE_TOKEN }}
           config-file: .github/release-please-config.json
           manifest-file: .github/.release-please-manifest.json
