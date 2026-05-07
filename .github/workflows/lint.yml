@@ -42,4 +42,9 @@ jobs:
       - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
+      # The goimports hook in .pre-commit-config.yaml is language: system,
+      # so the binary must be on PATH. Contributors get this from their
+      # local Go install; CI needs an explicit install step.
+      - name: install goimports
+        run: go install golang.org/x/tools/cmd/goimports@latest
       - uses: pre-commit/action@v3.0.1
