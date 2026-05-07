@@ -1,0 +1,45 @@
+name: release
+
+# Triggered when release-please's PR merges and creates a tag (e.g.,
+# v0.1.0). goreleaser cross-compiles the binaries listed in
+# .goreleaser.yaml and uploads them to the GitHub release that
+# release-please created.
+#
+# The default GITHUB_TOKEN is sufficient — goreleaser only needs
+# `contents: write` to upload assets to an existing release. The
+# RELEASE_PLEASE_TOKEN PAT is only needed by the release-please
+# workflow itself (so its tag creation triggers this workflow);
+# this job doesn't need it.
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  # Mid-release cancellation can leave a half-uploaded release on
+  # GitHub. Slow but safe.
+  cancel-in-progress: false
+
+jobs:
+  goreleaser:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          # goreleaser needs full git history for changelog/diff.
+          fetch-depth: 0
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+      - uses: goreleaser/goreleaser-action@v6
+        with:
+          distribution: goreleaser
+          version: "~> v2"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

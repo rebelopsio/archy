@@ -1,0 +1,57 @@
+version: 2
+
+project_name: archy
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: archy
+    main: ./cmd/archy
+    binary: archy
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w
+      - -X github.com/rebelopsio/archy/internal/version.Version={{.Version}}
+      - -X github.com/rebelopsio/archy/internal/version.Commit={{.Commit}}
+      - -X github.com/rebelopsio/archy/internal/version.Date={{.Date}}
+
+archives:
+  - id: archy
+    formats: [tar.gz]
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    files:
+      - LICENSE
+      - README.md
+
+checksum:
+  name_template: "checksums.txt"
+  algorithm: sha256
+
+snapshot:
+  version_template: "{{ incpatch .Version }}-next"
+
+# release-please owns CHANGELOG.md and the GitHub release body's
+# changelog content. Letting goreleaser generate its own changelog
+# would result in two competing changelogs in the release body. If
+# this gets re-enabled accidentally in the future, the release body
+# will look obviously wrong; that's the canary.
+changelog:
+  disable: true
+
+release:
+  # release-please creates the tag and the release; goreleaser
+  # appends binaries to the existing release rather than creating a
+  # new one. Required when using release-please's "tag drives release"
+  # model.
+  mode: append
+  draft: false
+  prerelease: auto
