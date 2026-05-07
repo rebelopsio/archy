@@ -42,8 +42,34 @@ After cloning this repo or creating it fresh, configure the following once:
    - Require conversation resolution before merging.
 5. Confirm release-please's first PR appears after the next conventional commit lands on `main`. Merge it to bootstrap `v0.1.0`.
 6. After the `pr-title` workflow runs successfully on at least one PR, add `Validate PR title` to the required status checks for `main` in branch protection.
+7. Install pre-commit hooks (per-clone, one-time): `pip install pre-commit && pre-commit install`.
 
 These are one-time, human-driven steps. They are intentionally not automated — the credentials needed (admin token, app installations, PAT) are out of scope for the repo.
+
+## Pre-commit hooks
+
+This repo uses [pre-commit](https://pre-commit.com) for fast local feedback on formatting and linting. Setup is one-time per clone:
+
+```sh
+pip install pre-commit          # or: pipx install pre-commit
+pre-commit install
+```
+
+The configured hooks mirror the CI checks (file hygiene, gofmt, goimports, go vet, go mod tidy, golangci-lint). To run all of them against the entire repo:
+
+```sh
+pre-commit run --all-files
+```
+
+To bypass hooks for a single commit (use sparingly):
+
+```sh
+git commit --no-verify
+```
+
+CI also runs the hooks via the `pre-commit` job in [`.github/workflows/lint.yml`](../.github/workflows/lint.yml), so anything that slips past local hooks is caught server-side.
+
+Conventional-commit format is **not** enforced by pre-commit — release-please reads commits on `main` arriving via squash-merge, and the squash commit's message is the PR title, not anything a local hook ever validates. PR titles are validated by the `pr-title` workflow (see "How conventional commits are enforced" above).
 
 ## Auto-merge
 
