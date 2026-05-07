@@ -5,4 +5,3 @@ vault:
 :::: this is not valid YAML
 agent:
   model: [unclosed
-

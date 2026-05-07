@@ -1,0 +1,82 @@
+# pre-commit hooks for archy.
+#
+# Setup (once per clone):
+#   pip install pre-commit         # or: pipx install pre-commit
+#   pre-commit install
+#
+# Run all hooks against the whole repo (matches what CI does):
+#   pre-commit run --all-files
+#
+# These hooks mirror the checks in .github/workflows/ci.yml and lint.yml.
+# CI is the source of truth; these hooks exist for fast local feedback.
+# Conventional-commit enforcement happens in CI on the PR title, not here.
+
+default_stages: [pre-commit]
+
+repos:
+  # Generic file hygiene.
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: trailing-whitespace
+        # Preserve hard line breaks in markdown.
+        args: [--markdown-linebreak-ext=md]
+      - id: end-of-file-fixer
+      - id: check-yaml
+        # Exclude deliberately-malformed YAML fixtures used by parser
+        # tests (e.g., internal/config/testdata/malformed.yaml exists
+        # specifically to verify ErrConfigParse).
+        exclude: ^.*/testdata/.*\.ya?ml$
+      - id: check-json
+      - id: check-toml
+      - id: check-added-large-files
+        args: [--maxkb=500]
+      - id: check-merge-conflict
+      - id: check-symlinks
+      - id: detect-private-key
+      - id: mixed-line-ending
+        args: [--fix=lf]
+
+  # Go formatting and vet — local hooks using the developer's existing
+  # Go toolchain. Anyone working on archy already has Go installed; this
+  # avoids pre-commit installing a separate Go toolchain.
+  - repo: local
+    hooks:
+      - id: gofmt
+        name: gofmt
+        description: Run gofmt -s -w on staged Go files.
+        entry: gofmt -s -w
+        language: system
+        types: [go]
+        pass_filenames: true
+
+      - id: goimports
+        name: goimports
+        description: Run goimports -w on staged Go files.
+        entry: goimports -w
+        language: system
+        types: [go]
+        pass_filenames: true
+
+      - id: go-vet
+        name: go vet
+        description: Run go vet against the whole module.
+        entry: go vet ./...
+        language: system
+        types: [go]
+        pass_filenames: false
+
+      - id: go-mod-tidy
+        name: go mod tidy
+        description: Verify go.mod and go.sum are tidy.
+        entry: go mod tidy
+        language: system
+        types: [go]
+        pass_filenames: false
+
+  # golangci-lint — same configuration the CI lint workflow uses.
+  - repo: https://github.com/golangci/golangci-lint
+    rev: v2.12.1
+    hooks:
+      - id: golangci-lint
+        # Honors .golangci.yml; same config as CI.
