@@ -1,0 +1,15 @@
+name: daily-brief
+write_mode: marker-block
+marker_id: daily-brief
+
+frontmatter:
+  type: daily-brief
+  tags: [daily, work, archy-generated]
+
+blocks:
+  - top_priorities:
+      sources: [linear]
+      limit: 5
+  - synthesis:
+      depends_on: [top_priorities]
+      style: brief
