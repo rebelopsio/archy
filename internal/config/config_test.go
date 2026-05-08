@@ -36,7 +36,7 @@ func clearArchyEnv(t *testing.T) {
 	}
 }
 
-// isolateConfigDir points os.UserConfigDir at a fresh tempdir for the
+// isolateConfigDir points defaultConfigDir at a fresh tempdir for the
 // test by setting HOME and XDG_CONFIG_HOME. Returns the resolved
 // archy/config.yaml path.
 func isolateConfigDir(t *testing.T) string {
@@ -44,7 +44,7 @@ func isolateConfigDir(t *testing.T) string {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("XDG_CONFIG_HOME", "")
-	cfgDir, err := os.UserConfigDir()
+	cfgDir, err := defaultConfigDir()
 	require.NoError(t, err)
 	return filepath.Join(cfgDir, "archy", "config.yaml")
 }
@@ -296,8 +296,8 @@ func TestLoadDefault_LoadsFileAtDefaultLocation(t *testing.T) {
 }
 
 func TestLoadDefault_RespectsXDGConfigHome(t *testing.T) {
-	if runtime.GOOS != "linux" {
-		t.Skip("XDG_CONFIG_HOME is honored only on Linux by os.UserConfigDir")
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows uses %AppData% even when XDG_CONFIG_HOME is set")
 	}
 	clearArchyEnv(t)
 
@@ -316,8 +316,8 @@ func TestLoadDefault_RespectsXDGConfigHome(t *testing.T) {
 }
 
 func TestLoadDefault_FallsBackToHomeConfig_WhenXDGUnset(t *testing.T) {
-	if runtime.GOOS != "linux" {
-		t.Skip("~/.config fallback is Linux-specific in os.UserConfigDir")
+	if runtime.GOOS == "windows" {
+		t.Skip("the ~/.config fallback is Unix-only; Windows uses %AppData%")
 	}
 	clearArchyEnv(t)
 

@@ -6,6 +6,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 
@@ -155,14 +156,35 @@ func Load(path string) (*Config, error) {
 	return finalize(v)
 }
 
+// defaultConfigDir returns the directory archy's config.yaml lives
+// under. It honors $XDG_CONFIG_HOME on all platforms when set, then
+// falls back to ~/.config on Linux and macOS, or os.UserConfigDir
+// (i.e. %AppData%) on Windows. macOS is intentionally treated like
+// Linux here: dev-tool convention on macOS (gh, nvim, lazygit,
+// kubectl, etc.) favors XDG over ~/Library/Application Support.
+func defaultConfigDir() (string, error) {
+	if v := os.Getenv("XDG_CONFIG_HOME"); v != "" {
+		return v, nil
+	}
+	if runtime.GOOS == "windows" {
+		return os.UserConfigDir()
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(home, ".config"), nil
+}
+
 // LoadDefault loads the config from the default location:
-// $XDG_CONFIG_HOME/archy/config.yaml on Linux (or ~/.config/archy/config.yaml
-// when XDG_CONFIG_HOME is unset), ~/Library/Application Support/archy/config.yaml
-// on macOS. If the file does not exist, returns a Config populated entirely
-// from defaults (and any ARCHY_ env-var overrides) and validates it. Returns
-// an error only on I/O, parse, or validation failure.
+// $XDG_CONFIG_HOME/archy/config.yaml when XDG_CONFIG_HOME is set, otherwise
+// ~/.config/archy/config.yaml on Linux and macOS, or
+// %AppData%\archy\config.yaml on Windows. If the file does not exist,
+// returns a Config populated entirely from defaults (and any ARCHY_ env-var
+// overrides) and validates it. Returns an error only on I/O, parse, or
+// validation failure.
 func LoadDefault() (*Config, error) {
-	cfgDir, err := os.UserConfigDir()
+	cfgDir, err := defaultConfigDir()
 	if err != nil {
 		return nil, fmt.Errorf("load default: %w", err)
 	}
@@ -170,7 +192,7 @@ func LoadDefault() (*Config, error) {
 
 	v := newViper()
 
-	f, err := os.Open(path) //nolint:gosec // default config path computed from os.UserConfigDir
+	f, err := os.Open(path) //nolint:gosec // default config path computed from defaultConfigDir
 	switch {
 	case err == nil:
 		defer func() { _ = f.Close() }()
