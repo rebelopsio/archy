@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 	"time"
 
@@ -31,8 +32,14 @@ func clearArchyEnv(t *testing.T) {
 		"ARCHY_SKILLS_PROJECT_DIR",
 		"ARCHY_SKILLS_USER_DIR",
 		"ARCHY_SCORING_MEETING_SOON_WEIGHT",
+		"ARCHY_USER_EMAIL",
+		"ARCHY_USER_EMAILS",
+		"ARCHY_USER_USERNAME",
+		"ARCHY_USER_LINEAR_HANDLE",
+		"ARCHY_USER_GITHUB_HANDLE",
 	} {
 		t.Setenv(k, "")
+		_ = os.Unsetenv(k)
 	}
 }
 
@@ -55,14 +62,15 @@ func writeYAML(t *testing.T, path, content string) {
 	require.NoError(t, os.WriteFile(path, []byte(content), 0o644))
 }
 
-// minimalConfig writes a config.yaml whose only set value is vault.path.
-// The vault directory itself is created and returned.
+// minimalConfig writes a config.yaml with the minimum fields a Config
+// needs to validate: vault.path and user.emails. The vault directory
+// itself is created and returned.
 func minimalConfig(t *testing.T) (yamlPath, vaultPath string) {
 	t.Helper()
 	dir := t.TempDir()
 	vault := t.TempDir()
 	yamlPath = filepath.Join(dir, "config.yaml")
-	writeYAML(t, yamlPath, "vault:\n  path: "+vault+"\n")
+	writeYAML(t, yamlPath, "vault:\n  path: "+vault+"\nuser:\n  emails: [u@example.com]\n")
 	return yamlPath, vault
 }
 
@@ -166,6 +174,8 @@ output:
   signature: false
 state:
   cache_ttl: 1h
+user:
+  emails: [u@example.com]
 `)
 
 	cfg, err := Load(yamlPath)
@@ -193,6 +203,8 @@ skills:
   user_dir: ~/skills/user
 state:
   sqlite_path: ~/db/state.db
+user:
+  emails: [u@example.com]
 `)
 	// Pre-create the vault path so validation passes.
 	require.NoError(t, os.MkdirAll(filepath.Join(home, "vault"), 0o755))
@@ -236,7 +248,7 @@ func TestEnv_ARCHY_OUTPUT_VOICE_OverridesFile(t *testing.T) {
 	dir := t.TempDir()
 	vault := t.TempDir()
 	yamlPath := filepath.Join(dir, "config.yaml")
-	writeYAML(t, yamlPath, "vault:\n  path: "+vault+"\noutput:\n  voice: true\n")
+	writeYAML(t, yamlPath, "vault:\n  path: "+vault+"\noutput:\n  voice: true\nuser:\n  emails: [u@example.com]\n")
 
 	t.Setenv("ARCHY_OUTPUT_VOICE", "false")
 	cfg, err := Load(yamlPath)
@@ -261,6 +273,7 @@ func TestEnv_AppliesWhenNoFileLoaded(t *testing.T) {
 
 	vault := t.TempDir()
 	t.Setenv("ARCHY_VAULT_PATH", vault)
+	t.Setenv("ARCHY_USER_EMAILS", "u@example.com")
 
 	cfg, err := LoadDefault()
 	require.NoError(t, err)
@@ -276,6 +289,7 @@ func TestLoadDefault_NoFile_ReturnsDefaults(t *testing.T) {
 
 	vault := t.TempDir()
 	t.Setenv("ARCHY_VAULT_PATH", vault)
+	t.Setenv("ARCHY_USER_EMAILS", "u@example.com")
 
 	cfg, err := LoadDefault()
 	require.NoError(t, err)
@@ -287,7 +301,7 @@ func TestLoadDefault_LoadsFileAtDefaultLocation(t *testing.T) {
 	clearArchyEnv(t)
 	cfgFile := isolateConfigDir(t)
 	vault := t.TempDir()
-	writeYAML(t, cfgFile, "vault:\n  path: "+vault+"\nagent:\n  model: from-file\n")
+	writeYAML(t, cfgFile, "vault:\n  path: "+vault+"\nagent:\n  model: from-file\nuser:\n  emails: [u@example.com]\n")
 
 	cfg, err := LoadDefault()
 	require.NoError(t, err)
@@ -308,7 +322,7 @@ func TestLoadDefault_RespectsXDGConfigHome(t *testing.T) {
 
 	vault := t.TempDir()
 	cfgFile := filepath.Join(xdg, "archy", "config.yaml")
-	writeYAML(t, cfgFile, "vault:\n  path: "+vault+"\nagent:\n  model: from-xdg\n")
+	writeYAML(t, cfgFile, "vault:\n  path: "+vault+"\nagent:\n  model: from-xdg\nuser:\n  emails: [u@example.com]\n")
 
 	cfg, err := LoadDefault()
 	require.NoError(t, err)
@@ -327,7 +341,7 @@ func TestLoadDefault_FallsBackToHomeConfig_WhenXDGUnset(t *testing.T) {
 
 	vault := t.TempDir()
 	cfgFile := filepath.Join(home, ".config", "archy", "config.yaml")
-	writeYAML(t, cfgFile, "vault:\n  path: "+vault+"\nagent:\n  model: from-home\n")
+	writeYAML(t, cfgFile, "vault:\n  path: "+vault+"\nagent:\n  model: from-home\nuser:\n  emails: [u@example.com]\n")
 
 	cfg, err := LoadDefault()
 	require.NoError(t, err)
@@ -348,6 +362,7 @@ func TestValidate_FullyPopulatedValid(t *testing.T) {
 		Scoring: ScoringConfig{MeetingSoonWeight: 5, UrgentIssueWeight: 8, ReviewRequestedWeight: 7},
 		State:   StateConfig{SQLitePath: "/var/lib/archy/state.db", CacheTTL: 15 * time.Minute},
 		Output:  OutputConfig{DefaultWriteMode: "marker-block", Timezone: "America/New_York", Signature: true, Voice: true},
+		User:    UserConfig{Emails: []string{"u@example.com"}},
 	}
 	require.NoError(t, cfg.Validate())
 }
@@ -372,6 +387,7 @@ func validBaseline(t *testing.T) *Config {
 		Scoring: ScoringConfig{MeetingSoonWeight: 5, UrgentIssueWeight: 8, ReviewRequestedWeight: 7},
 		State:   StateConfig{SQLitePath: "/var/lib/archy/state.db", CacheTTL: 15 * time.Minute},
 		Output:  OutputConfig{DefaultWriteMode: "marker-block", Timezone: "Local", Signature: true, Voice: true},
+		User:    UserConfig{Emails: []string{"u@example.com"}},
 	}
 }
 
@@ -560,6 +576,8 @@ mcp_servers:
     url: https://mcp.linear.app/mcp
     enabled: true
     bearer_token_env: ARCHY_LINEAR_TOKEN
+user:
+  emails: [u@example.com]
 `)
 
 	cfg, err := Load(yamlPath)
@@ -580,6 +598,8 @@ mcp_servers:
   linear:
     url: https://mcp.linear.app/mcp
     enabled: false
+user:
+  emails: [u@example.com]
 `)
 	cfg, err := Load(yamlPath)
 	require.NoError(t, err)
@@ -639,4 +659,233 @@ func TestValidate_BearerTokenEnv_MultipleProvidersMixed(t *testing.T) {
 		"slack":  {URL: "https://example.com/slack", Enabled: false, BearerTokenEnv: "UNSET_BUT_DISABLED"},
 	}
 	require.NoError(t, cfg.Validate())
+}
+
+// === User identity config (per docs/prd/user-identity.md) ===
+
+// captureWarnings redirects userOverrideWarnWriter to a buffer for the
+// duration of the test and returns a getter for the captured output.
+func captureWarnings(t *testing.T) func() string {
+	t.Helper()
+	prev := userOverrideWarnWriter
+	buf := &strings.Builder{}
+	userOverrideWarnWriter = buf
+	t.Cleanup(func() { userOverrideWarnWriter = prev })
+	return buf.String
+}
+
+func TestSplitCSVEnv(t *testing.T) {
+	cases := []struct {
+		in   string
+		want []string
+	}{
+		{"", nil},
+		{"a", []string{"a"}},
+		{"a,b,c", []string{"a", "b", "c"}},
+		{"  a , b  ", []string{"a", "b"}},
+		{",a,,b,", []string{"a", "b"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.in, func(t *testing.T) {
+			assert.Equal(t, tc.want, splitCSVEnv(tc.in))
+		})
+	}
+}
+
+func TestLoad_UserConfigPopulates(t *testing.T) {
+	clearArchyEnv(t)
+	dir := t.TempDir()
+	vault := t.TempDir()
+	yamlPath := filepath.Join(dir, "config.yaml")
+	writeYAML(t, yamlPath, `
+vault:
+  path: `+vault+`
+user:
+  emails:
+    - primary@example.com
+    - alt@example.com
+  linear_handle: steve
+  github_handle: rebelopsio
+`)
+
+	cfg, err := Load(yamlPath)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"primary@example.com", "alt@example.com"}, cfg.User.Emails)
+	assert.Equal(t, "steve", cfg.User.LinearHandle)
+	assert.Equal(t, "rebelopsio", cfg.User.GitHubHandle)
+}
+
+func TestLoad_UserEmailsDedupesCaseInsensitive(t *testing.T) {
+	clearArchyEnv(t)
+	dir := t.TempDir()
+	vault := t.TempDir()
+	yamlPath := filepath.Join(dir, "config.yaml")
+	writeYAML(t, yamlPath, `
+vault:
+  path: `+vault+`
+user:
+  emails:
+    - primary@example.com
+    - PRIMARY@example.com
+    - alt@example.com
+    - Alt@Example.COM
+`)
+
+	cfg, err := Load(yamlPath)
+	require.NoError(t, err)
+	// First-occurrence wins; order preserved.
+	assert.Equal(t, []string{"primary@example.com", "alt@example.com"}, cfg.User.Emails)
+}
+
+func TestLoad_UserEmailsTrimsWhitespace(t *testing.T) {
+	clearArchyEnv(t)
+	dir := t.TempDir()
+	vault := t.TempDir()
+	yamlPath := filepath.Join(dir, "config.yaml")
+	writeYAML(t, yamlPath, `
+vault:
+  path: `+vault+`
+user:
+  emails:
+    - "  primary@example.com  "
+    - "alt@example.com"
+`)
+
+	cfg, err := Load(yamlPath)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"primary@example.com", "alt@example.com"}, cfg.User.Emails)
+}
+
+func TestValidate_UserEmailsEmptyFails(t *testing.T) {
+	cfg := validBaseline(t)
+	cfg.User.Emails = nil
+	err := cfg.Validate()
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, ErrInvalidConfig))
+	assert.Contains(t, err.Error(), "user.emails is required")
+}
+
+func TestValidate_UserEmailsMalformedFails(t *testing.T) {
+	cfg := validBaseline(t)
+	cfg.User.Emails = []string{"not-an-email"}
+	err := cfg.Validate()
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, ErrInvalidConfig))
+	assert.Contains(t, err.Error(), "is not a valid email address")
+}
+
+func TestValidate_UserLinearHandleWhitespaceFails(t *testing.T) {
+	cfg := validBaseline(t)
+	cfg.User.LinearHandle = "has spaces"
+	err := cfg.Validate()
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, ErrInvalidConfig))
+	assert.Contains(t, err.Error(), "user.linear_handle")
+}
+
+func TestValidate_UserGitHubHandleWhitespaceFails(t *testing.T) {
+	cfg := validBaseline(t)
+	cfg.User.GitHubHandle = "has\ttab"
+	err := cfg.Validate()
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, ErrInvalidConfig))
+	assert.Contains(t, err.Error(), "user.github_handle")
+}
+
+func TestValidate_UserEmptyHandlesAccepted(t *testing.T) {
+	cfg := validBaseline(t)
+	cfg.User.LinearHandle = ""
+	cfg.User.GitHubHandle = ""
+	require.NoError(t, cfg.Validate())
+}
+
+func TestValidate_UserMultipleErrorsJoin(t *testing.T) {
+	cfg := validBaseline(t)
+	cfg.User.Emails = nil
+	cfg.User.LinearHandle = "has spaces"
+	err := cfg.Validate()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "user.emails is required")
+	assert.Contains(t, err.Error(), "user.linear_handle")
+}
+
+func TestEnv_UserEmailsOverridesFile(t *testing.T) {
+	clearArchyEnv(t)
+	dir := t.TempDir()
+	vault := t.TempDir()
+	yamlPath := filepath.Join(dir, "config.yaml")
+	writeYAML(t, yamlPath, `
+vault:
+  path: `+vault+`
+user:
+  emails: [from-file@example.com]
+`)
+	t.Setenv("ARCHY_USER_EMAILS", "a@b.com,c@d.com")
+
+	cfg, err := Load(yamlPath)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"a@b.com", "c@d.com"}, cfg.User.Emails)
+}
+
+func TestEnv_UserEmailsCSVParsesWhitespaceAndStrayCommas(t *testing.T) {
+	clearArchyEnv(t)
+	yamlPath, _ := minimalConfig(t)
+	t.Setenv("ARCHY_USER_EMAILS", "  a@b.com ,, c@d.com  ")
+
+	cfg, err := Load(yamlPath)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"a@b.com", "c@d.com"}, cfg.User.Emails)
+}
+
+func TestEnv_UserHandlesScalarOverrides(t *testing.T) {
+	clearArchyEnv(t)
+	yamlPath, _ := minimalConfig(t)
+	t.Setenv("ARCHY_USER_LINEAR_HANDLE", "linear-from-env")
+	t.Setenv("ARCHY_USER_GITHUB_HANDLE", "gh-from-env")
+
+	cfg, err := Load(yamlPath)
+	require.NoError(t, err)
+	assert.Equal(t, "linear-from-env", cfg.User.LinearHandle)
+	assert.Equal(t, "gh-from-env", cfg.User.GitHubHandle)
+}
+
+func TestEnv_DeprecatedUserEmailFallback(t *testing.T) {
+	clearArchyEnv(t)
+	getWarn := captureWarnings(t)
+
+	yamlPath, _ := minimalConfig(t)
+	t.Setenv("ARCHY_USER_EMAIL", "fallback@example.com")
+
+	cfg, err := Load(yamlPath)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"fallback@example.com"}, cfg.User.Emails)
+	assert.Contains(t, getWarn(), "ARCHY_USER_EMAIL is deprecated")
+}
+
+func TestEnv_DeprecatedUserUsernameFallback_LinearOnly(t *testing.T) {
+	clearArchyEnv(t)
+	getWarn := captureWarnings(t)
+
+	yamlPath, _ := minimalConfig(t)
+	t.Setenv("ARCHY_USER_USERNAME", "steve")
+
+	cfg, err := Load(yamlPath)
+	require.NoError(t, err)
+	assert.Equal(t, "steve", cfg.User.LinearHandle)
+	assert.Empty(t, cfg.User.GitHubHandle, "deprecated fallback only populates linear_handle")
+	assert.Contains(t, getWarn(), "ARCHY_USER_USERNAME is deprecated")
+}
+
+func TestEnv_NewVarWinsNoFallbackWarning(t *testing.T) {
+	clearArchyEnv(t)
+	getWarn := captureWarnings(t)
+
+	yamlPath, _ := minimalConfig(t)
+	t.Setenv("ARCHY_USER_EMAILS", "new@example.com")
+	t.Setenv("ARCHY_USER_EMAIL", "old@example.com") // ignored when new is set
+
+	cfg, err := Load(yamlPath)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"new@example.com"}, cfg.User.Emails)
+	assert.Empty(t, getWarn(), "no deprecation warning should fire when new var is set")
 }
