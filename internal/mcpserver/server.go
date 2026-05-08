@@ -7,6 +7,7 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"github.com/rebelopsio/archy/internal/domain"
 	"github.com/rebelopsio/archy/internal/scoring"
 	"github.com/rebelopsio/archy/internal/write"
 )
@@ -46,11 +47,9 @@ type Config struct {
 	// values at evaluation time.
 	ScoringThresholds scoring.Thresholds
 
-	// UserEmail is the operating user's email. Required.
-	UserEmail string
-
-	// UserUsername is the operating user's provider handle. Required.
-	UserUsername string
+	// User identifies the operating user across providers. Required:
+	// must contain at least one email entry.
+	User domain.Identity
 
 	// KeyStakeholders are usernames or emails whose calendar events get
 	// a stakeholder boost. Optional.
@@ -65,11 +64,8 @@ func New(cfg Config) (*Server, error) {
 	if cfg.Writer == nil {
 		return nil, fmt.Errorf("%w: Writer is required", ErrInvalidConfig)
 	}
-	if cfg.UserEmail == "" {
-		return nil, fmt.Errorf("%w: UserEmail is required", ErrInvalidConfig)
-	}
-	if cfg.UserUsername == "" {
-		return nil, fmt.Errorf("%w: UserUsername is required", ErrInvalidConfig)
+	if len(cfg.User.Emails) == 0 {
+		return nil, fmt.Errorf("%w: User.Emails must contain at least one entry", ErrInvalidConfig)
 	}
 
 	s := &Server{

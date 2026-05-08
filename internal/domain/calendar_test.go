@@ -47,47 +47,53 @@ func TestCalendarEvent_IsHappeningAt(t *testing.T) {
 }
 
 func TestCalendarEvent_HasExternalAttendees(t *testing.T) {
-	t.Run("external-domain-detected", func(t *testing.T) {
+	me := MakeIdentity([]string{"user@example.com"}, "", "")
+
+	t.Run("non-self-attendee-detected", func(t *testing.T) {
 		e := CalendarEvent{Attendees: []Person{
 			{Email: "alice@example.com"},
 			{Email: "bob@vendor.io"},
 		}}
-		assert.True(t, e.HasExternalAttendees("user@example.com"))
+		assert.True(t, e.HasExternalAttendees(me))
 	})
 
-	t.Run("all-internal", func(t *testing.T) {
+	t.Run("all-attendees-are-me", func(t *testing.T) {
+		multi := MakeIdentity([]string{"user@example.com", "alt@personal.io"}, "", "")
 		e := CalendarEvent{Attendees: []Person{
-			{Email: "alice@example.com"},
-			{Email: "bob@example.com"},
+			{Email: "user@example.com"},
+			{Email: "alt@personal.io"},
 		}}
-		assert.False(t, e.HasExternalAttendees("user@example.com"))
+		assert.False(t, e.HasExternalAttendees(multi))
 	})
 
-	t.Run("user-email-without-at", func(t *testing.T) {
-		e := CalendarEvent{Attendees: []Person{{Email: "alice@example.com"}}}
-		assert.False(t, e.HasExternalAttendees("not-an-email"))
+	t.Run("alt-email-treated-as-internal", func(t *testing.T) {
+		multi := MakeIdentity([]string{"user@example.com", "alt@personal.io"}, "", "")
+		e := CalendarEvent{Attendees: []Person{{Email: "alt@personal.io"}}}
+		assert.False(t, e.HasExternalAttendees(multi))
 	})
 
-	t.Run("case-insensitive-domain", func(t *testing.T) {
-		e := CalendarEvent{Attendees: []Person{{Email: "alice@EXAMPLE.com"}}}
-		assert.False(t, e.HasExternalAttendees("user@example.com"))
+	t.Run("case-insensitive-match", func(t *testing.T) {
+		e := CalendarEvent{Attendees: []Person{{Email: "USER@example.com"}}}
+		assert.False(t, e.HasExternalAttendees(me))
 	})
 
-	t.Run("skips-empty-emails", func(t *testing.T) {
+	t.Run("empty-identity-emails-returns-false", func(t *testing.T) {
+		empty := MakeIdentity(nil, "", "")
+		e := CalendarEvent{Attendees: []Person{{Email: "anyone@vendor.io"}}}
+		assert.False(t, e.HasExternalAttendees(empty))
+	})
+
+	t.Run("skips-empty-attendee-emails", func(t *testing.T) {
 		e := CalendarEvent{Attendees: []Person{
 			{Name: "No Email"},
-			{Email: "alice@example.com"},
+			{Email: "user@example.com"},
 		}}
-		assert.False(t, e.HasExternalAttendees("user@example.com"))
+		// Only attendees with emails count, and the only one (user) is "me".
+		assert.False(t, e.HasExternalAttendees(me))
 	})
 
 	t.Run("no-attendees", func(t *testing.T) {
 		e := CalendarEvent{}
-		assert.False(t, e.HasExternalAttendees("user@example.com"))
-	})
-
-	t.Run("user-email-trailing-at", func(t *testing.T) {
-		e := CalendarEvent{Attendees: []Person{{Email: "alice@example.com"}}}
-		assert.False(t, e.HasExternalAttendees("user@"))
+		assert.False(t, e.HasExternalAttendees(me))
 	})
 }

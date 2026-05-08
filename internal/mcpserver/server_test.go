@@ -11,31 +11,25 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/rebelopsio/archy/internal/domain"
 	"github.com/rebelopsio/archy/internal/write"
 )
 
 func TestNew_ErrInvalidConfig_NilWriter(t *testing.T) {
-	_, err := New(Config{UserEmail: "u@e", UserUsername: "u"})
+	_, err := New(Config{User: domain.MakeIdentity([]string{"u@e.com"}, "u", "u")})
 	require.Error(t, err)
 	assert.True(t, errors.Is(err, ErrInvalidConfig))
 }
 
-func TestNew_ErrInvalidConfig_EmptyUserEmail(t *testing.T) {
+func TestNew_ErrInvalidConfig_EmptyUserEmails(t *testing.T) {
 	dir := t.TempDir()
 	w, err := write.New(dir)
 	require.NoError(t, err)
-	_, err = New(Config{Writer: w, UserUsername: "u"})
+	// Identity with no emails is rejected; handles alone aren't enough.
+	_, err = New(Config{Writer: w, User: domain.MakeIdentity(nil, "u", "u")})
 	require.Error(t, err)
 	assert.True(t, errors.Is(err, ErrInvalidConfig))
-}
-
-func TestNew_ErrInvalidConfig_EmptyUserUsername(t *testing.T) {
-	dir := t.TempDir()
-	w, err := write.New(dir)
-	require.NoError(t, err)
-	_, err = New(Config{Writer: w, UserEmail: "u@e"})
-	require.Error(t, err)
-	assert.True(t, errors.Is(err, ErrInvalidConfig))
+	assert.Contains(t, err.Error(), "User.Emails")
 }
 
 func TestServerName(t *testing.T) {

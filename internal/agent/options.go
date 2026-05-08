@@ -3,6 +3,7 @@ package agent
 import (
 	"fmt"
 	"net/url"
+	"strings"
 
 	claude "github.com/partio-io/claude-agent-sdk-go"
 
@@ -27,11 +28,8 @@ func buildOptions(cfg *config.Config, opts Options) ([]claude.Option, error) {
 	if cfg == nil {
 		return nil, fmt.Errorf("%w: Config is required", ErrSetup)
 	}
-	if opts.UserEmail == "" {
-		return nil, fmt.Errorf("%w: UserEmail is required", ErrSetup)
-	}
-	if opts.UserUsername == "" {
-		return nil, fmt.Errorf("%w: UserUsername is required", ErrSetup)
+	if len(opts.User.Emails) == 0 {
+		return nil, fmt.Errorf("%w: User.Emails must contain at least one entry", ErrSetup)
 	}
 
 	out := []claude.Option{
@@ -51,8 +49,9 @@ func buildOptions(cfg *config.Config, opts Options) ([]claude.Option, error) {
 		Command: opts.ArchyBinaryPath,
 		Args:    []string{"mcp-server"},
 		Env: map[string]string{
-			"ARCHY_USER_EMAIL":    opts.UserEmail,
-			"ARCHY_USER_USERNAME": opts.UserUsername,
+			"ARCHY_USER_EMAILS":        strings.Join(opts.User.Emails, ","),
+			"ARCHY_USER_LINEAR_HANDLE": opts.User.LinearHandle,
+			"ARCHY_USER_GITHUB_HANDLE": opts.User.GitHubHandle,
 		},
 	}))
 

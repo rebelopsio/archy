@@ -1,9 +1,6 @@
 package domain
 
-import (
-	"strings"
-	"time"
-)
+import "time"
 
 // CalendarEvent is a calendar item: a Google Calendar event, an Outlook
 // event, etc.
@@ -59,37 +56,21 @@ func (e CalendarEvent) IsHappeningAt(t time.Time) bool {
 }
 
 // HasExternalAttendees reports whether any attendee has a non-empty
-// email whose domain (the part after "@") differs from userEmail's
-// domain (case-insensitive). Empty attendee emails are skipped. If
-// userEmail has no "@", returns false — we can't determine who is
-// "external" without knowing the user's domain.
-func (e CalendarEvent) HasExternalAttendees(userEmail string) bool {
-	userDomain, ok := emailDomain(userEmail)
-	if !ok {
+// email that is not one of the operator's registered emails (per
+// Identity.MatchesEmail, case-insensitive). Empty attendee emails are
+// skipped. Returns false when id has no emails configured — without
+// any "me" emails we cannot label anyone as "external".
+func (e CalendarEvent) HasExternalAttendees(id Identity) bool {
+	if len(id.Emails) == 0 {
 		return false
 	}
 	for _, a := range e.Attendees {
 		if a.Email == "" {
 			continue
 		}
-		d, ok := emailDomain(a.Email)
-		if !ok {
-			continue
-		}
-		if d != userDomain {
+		if !id.MatchesEmail(a.Email) {
 			return true
 		}
 	}
 	return false
-}
-
-// emailDomain returns the lowercase domain portion of email (after the
-// last "@"). The second return is false if no "@" is present or the
-// domain is empty.
-func emailDomain(email string) (string, bool) {
-	at := strings.LastIndex(email, "@")
-	if at < 0 || at == len(email)-1 {
-		return "", false
-	}
-	return strings.ToLower(email[at+1:]), true
 }

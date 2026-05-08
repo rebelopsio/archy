@@ -12,6 +12,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/rebelopsio/archy/internal/config"
+	"github.com/rebelopsio/archy/internal/domain"
 )
 
 // fakeRunner is the in-package test double that replaces the real SDK
@@ -58,8 +59,7 @@ func newTestRuntime(t *testing.T, fr *fakeRunner) *Runtime {
 	rt, err := New(Options{
 		Config:          baselineConfig(),
 		ArchyBinaryPath: "/fake/archy",
-		UserEmail:       "user@example.com",
-		UserUsername:    "user",
+		User:            domain.MakeIdentity([]string{"user@example.com"}, "user", "user"),
 	})
 	require.NoError(t, err)
 	rt.runner = fr
@@ -84,28 +84,23 @@ func baselineConfig() *config.Config {
 }
 
 func TestNew_MissingConfig(t *testing.T) {
-	_, err := New(Options{UserEmail: "u@e", UserUsername: "u"})
+	_, err := New(Options{User: domain.MakeIdentity([]string{"u@e.com"}, "u", "u")})
 	require.Error(t, err)
 	assert.True(t, errors.Is(err, ErrSetup))
 }
 
-func TestNew_MissingUserEmail(t *testing.T) {
-	_, err := New(Options{Config: baselineConfig(), ArchyBinaryPath: "/fake/archy", UserUsername: "u"})
+func TestNew_MissingUserEmails(t *testing.T) {
+	// Empty Identity (no emails) is rejected; handles alone aren't enough.
+	_, err := New(Options{Config: baselineConfig(), ArchyBinaryPath: "/fake/archy", User: domain.MakeIdentity(nil, "u", "u")})
 	require.Error(t, err)
 	assert.True(t, errors.Is(err, ErrSetup))
-}
-
-func TestNew_MissingUserUsername(t *testing.T) {
-	_, err := New(Options{Config: baselineConfig(), ArchyBinaryPath: "/fake/archy", UserEmail: "u@e"})
-	require.Error(t, err)
-	assert.True(t, errors.Is(err, ErrSetup))
+	assert.Contains(t, err.Error(), "User.Emails")
 }
 
 func TestNew_DefaultsArchyBinaryPathFromExecutable(t *testing.T) {
 	rt, err := New(Options{
-		Config:       baselineConfig(),
-		UserEmail:    "u@e",
-		UserUsername: "u",
+		Config: baselineConfig(),
+		User:   domain.MakeIdentity([]string{"u@e.com"}, "u", "u"),
 		// ArchyBinaryPath intentionally empty — should fall back to
 		// os.Executable() (the test binary's path).
 	})
@@ -114,7 +109,7 @@ func TestNew_DefaultsArchyBinaryPathFromExecutable(t *testing.T) {
 }
 
 func TestClose_Idempotent(t *testing.T) {
-	rt, err := New(Options{Config: baselineConfig(), ArchyBinaryPath: "/fake/archy", UserEmail: "u@e", UserUsername: "u"})
+	rt, err := New(Options{Config: baselineConfig(), ArchyBinaryPath: "/fake/archy", User: domain.MakeIdentity([]string{"u@e.com"}, "u", "u")})
 	require.NoError(t, err)
 	require.NoError(t, rt.Close())
 	require.NoError(t, rt.Close())

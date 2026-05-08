@@ -116,8 +116,7 @@ func (s *Server) handleScoreItems(
 	now := s.now()
 	ctx := scoring.Context{
 		Now:             now,
-		UserEmail:       s.cfg.UserEmail,
-		UserUsername:    s.cfg.UserUsername,
+		User:            s.cfg.User,
 		KeyStakeholders: s.cfg.KeyStakeholders,
 		Weights:         s.cfg.ScoringWeights,
 		Thresholds:      s.cfg.ScoringThresholds,

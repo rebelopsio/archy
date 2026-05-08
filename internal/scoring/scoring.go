@@ -75,11 +75,9 @@ type Context struct {
 	// Now is the reference time for time-dependent signals. Signals never
 	// call time.Now() — they read from this field.
 	Now time.Time
-	// UserEmail is the operating user's primary email, used by signals
-	// that distinguish the user from other people.
-	UserEmail string
-	// UserUsername is the operating user's provider handle.
-	UserUsername string
+	// User identifies the operating user across providers. Signals use
+	// it to distinguish the user from other people in scoring.
+	User domain.Identity
 	// KeyStakeholders is a set of usernames or emails treated as
 	// important for the key_stakeholder signal. Empty disables the signal.
 	KeyStakeholders []string

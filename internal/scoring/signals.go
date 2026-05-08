@@ -48,12 +48,6 @@ var signalsForEvent = []signalDef{
 	{name: "key_stakeholder", weight: func(w Weights) int { return w.KeyStakeholder }, fn: signalKeyStakeholder},
 }
 
-// userPerson is the person-shape used by signals that match by username
-// or email.
-func userPerson(ctx Context) domain.Person {
-	return domain.Person{Username: ctx.UserUsername, Email: ctx.UserEmail}
-}
-
 // --- signals ---
 
 func signalMeetingSoon(ctx Context, item Item) (bool, string) {
@@ -75,7 +69,7 @@ func signalUrgentIssue(_ Context, item Item) (bool, string) {
 
 func signalReviewRequested(ctx Context, item Item) (bool, string) {
 	pr := item.(PullRequestItem).PR
-	if pr.IsBlockedOnUser(userPerson(ctx)) {
+	if pr.IsBlockedOnUser(ctx.User) {
 		return true, "review requested from you"
 	}
 	return false, "not in requested reviewers"
@@ -102,7 +96,7 @@ func signalBlockedOnUser(ctx Context, item Item) (bool, string) {
 	if pr.State != domain.PullRequestStateOpen {
 		return false, "PR is " + pr.State.String()
 	}
-	if !pr.IsBlockedOnUser(userPerson(ctx)) {
+	if !pr.IsBlockedOnUser(ctx.User) {
 		return false, "not in requested reviewers"
 	}
 	if pr.CIPassing != nil && !*pr.CIPassing {
@@ -157,10 +151,10 @@ func signalExternalAttendees(ctx Context, item Item) (bool, string) {
 	if len(e.Attendees) == 0 {
 		return false, "no attendees"
 	}
-	if e.HasExternalAttendees(ctx.UserEmail) {
+	if e.HasExternalAttendees(ctx.User) {
 		return true, "has external attendees"
 	}
-	return false, "all attendees in your domain"
+	return false, "all attendees recognized as you"
 }
 
 func signalKeyStakeholder(ctx Context, item Item) (bool, string) {

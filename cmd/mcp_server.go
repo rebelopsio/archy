@@ -17,13 +17,13 @@ limitations under the License.
 package cmd
 
 import (
-	"os"
 	"os/signal"
 	"syscall"
 
 	"github.com/spf13/cobra"
 
 	"github.com/rebelopsio/archy/internal/config"
+	"github.com/rebelopsio/archy/internal/domain"
 	"github.com/rebelopsio/archy/internal/mcpserver"
 	"github.com/rebelopsio/archy/internal/scoring"
 	"github.com/rebelopsio/archy/internal/write"
@@ -54,8 +54,7 @@ var mcpServerCmd = &cobra.Command{
 		srv, err := mcpserver.New(mcpserver.Config{
 			Writer:         writer,
 			ScoringWeights: weightsFromConfig(cfg.Scoring),
-			UserEmail:      os.Getenv("ARCHY_USER_EMAIL"),
-			UserUsername:   os.Getenv("ARCHY_USER_USERNAME"),
+			User:           domain.MakeIdentity(cfg.User.Emails, cfg.User.LinearHandle, cfg.User.GitHubHandle),
 		})
 		if err != nil {
 			return err

@@ -33,6 +33,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/rebelopsio/archy/internal/config"
+	"github.com/rebelopsio/archy/internal/domain"
 )
 
 // skillBody is a tiny SKILL.md body the smoke test installs in a
@@ -89,8 +90,7 @@ func TestRun_IntegrationSmoke(t *testing.T) {
 		Config:          cfg,
 		ArchyBinaryPath: archyBin,
 		Cwd:             filepath.Dir(filepath.Dir(skillsDir)),
-		UserEmail:       "smoke@example.com",
-		UserUsername:    "smoke",
+		User:            domain.MakeIdentity([]string{"smoke@example.com"}, "smoke", "smoke"),
 	})
 	require.NoError(t, err)
 	defer func() { _ = rt.Close() }()
