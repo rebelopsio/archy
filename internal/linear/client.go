@@ -214,7 +214,7 @@ func extractIssuesJSON(res *mcp.CallToolResult) ([]byte, error) {
 			return []byte(t.Text), nil
 		}
 	}
-	return nil, fmt.Errorf("%w: list_issues response had no parseable content", ErrParse)
+	return nil, fmt.Errorf("%w: list_issues response had no parseable content (structured_content=%v, content_blocks=%d)", ErrParse, res.StructuredContent != nil, len(res.Content))
 }
 
 // unmarshalIssues handles both wrapped responses (the typical typed-
@@ -243,5 +243,15 @@ func unmarshalIssues(b []byte) ([]linearIssue, error) {
 	if err := json.Unmarshal(b, &direct); err == nil {
 		return direct, nil
 	}
-	return nil, errors.New("response was neither a wrapped object nor a bare array of issues")
+	return nil, fmt.Errorf("response was neither a wrapped object nor a bare array of issues; got: %s", truncate(b, 500))
+}
+
+// truncate returns b as a string, clipped to n bytes with a trailing
+// "…(N more bytes)" marker when truncation occurred. Used for keeping
+// diagnostic error messages bounded when including raw response bodies.
+func truncate(b []byte, n int) string {
+	if len(b) <= n {
+		return string(b)
+	}
+	return string(b[:n]) + fmt.Sprintf("…(%d more bytes)", len(b)-n)
 }

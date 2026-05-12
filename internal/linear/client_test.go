@@ -201,3 +201,33 @@ func TestUnmarshalIssues_Garbage(t *testing.T) {
 	_, err := unmarshalIssues([]byte("not json"))
 	require.Error(t, err)
 }
+
+func TestUnmarshalIssues_GarbageIncludesBodyInError(t *testing.T) {
+	_, err := unmarshalIssues([]byte(`{"surprise":"new shape"}`))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "neither a wrapped object nor a bare array")
+	assert.Contains(t, err.Error(), `{"surprise":"new shape"}`)
+}
+
+func TestUnmarshalIssues_LongBodyTruncated(t *testing.T) {
+	big := make([]byte, 700)
+	for i := range big {
+		big[i] = 'x'
+	}
+	body := append([]byte(`{"weird":"`), big...)
+	body = append(body, []byte(`"}`)...)
+
+	_, err := unmarshalIssues(body)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "more bytes")
+	// The error message should be bounded; assert it doesn't contain the
+	// full payload by checking length.
+	assert.Less(t, len(err.Error()), 700)
+}
+
+func TestTruncate(t *testing.T) {
+	assert.Equal(t, "abc", truncate([]byte("abc"), 10))
+	assert.Equal(t, "abc", truncate([]byte("abc"), 3))
+	got := truncate([]byte("abcdefghij"), 5)
+	assert.Equal(t, "abcde…(5 more bytes)", got)
+}
