@@ -271,3 +271,38 @@ func TestTruncate(t *testing.T) {
 	got := truncate([]byte("abcdefghij"), 5)
 	assert.Equal(t, "abcde…(5 more bytes)", got)
 }
+
+func TestUnmarshalIssues_RealisticLinearResponse(t *testing.T) {
+	// Representative of the actual Linear MCP wire shape as of
+	// 2026-05-12. If this test starts failing, Linear changed a
+	// field; check the diagnostic in unmarshalIssues for the
+	// specific decode error.
+	body := []byte(`{
+        "issues": [
+            {
+                "id": "ENG-760",
+                "title": "fix the thing",
+                "description": "body text",
+                "priority": {"value": 4, "name": "Low"},
+                "url": "https://linear.app/example/issue/ENG-760/x",
+                "createdAt": "2026-05-04T22:36:32.406Z",
+                "updatedAt": "2026-05-04T22:36:32.406Z",
+                "dueDate": null,
+                "status": "Backlog",
+                "statusType": "backlog",
+                "assignee": "Stephen Morgan",
+                "assigneeId": "861548d1-a0c1-4091-af9d-3f727b420fca"
+            }
+        ],
+        "hasNextPage": true,
+        "cursor": "abc"
+    }`)
+	got, err := unmarshalIssues(body)
+	require.NoError(t, err)
+	require.Len(t, got, 1)
+	assert.Equal(t, "ENG-760", got[0].ID)
+	assert.Equal(t, "Stephen Morgan", got[0].Assignee)
+	assert.Equal(t, "861548d1-a0c1-4091-af9d-3f727b420fca", got[0].AssigneeID)
+	require.NotNil(t, got[0].Priority)
+	assert.Equal(t, 4, got[0].Priority.Value)
+}

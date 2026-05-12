@@ -108,14 +108,11 @@ func TestIssueFromLinear_Roundtrip(t *testing.T) {
 		Description: "It is broken.",
 		Priority:    &linearPriority{Value: 1, Name: "Urgent"},
 		StatusType:  "started",
-		Assignee: &linearUser{
-			Name:     "Ada Lovelace",
-			Email:    "ada@example.com",
-			Username: "ada",
-		},
-		DueDate:   "2026-05-10",
-		CreatedAt: "2026-05-01T09:00:00Z",
-		UpdatedAt: "2026-05-06T12:00:00.123456Z",
+		Assignee:    "Ada Lovelace",
+		AssigneeID:  "861548d1-a0c1-4091-af9d-3f727b420fca",
+		DueDate:     "2026-05-10",
+		CreatedAt:   "2026-05-01T09:00:00Z",
+		UpdatedAt:   "2026-05-06T12:00:00.123456Z",
 	})
 	assert.Equal(t, "Fix the thing", got.Title)
 	assert.Equal(t, "It is broken.", got.Description)
@@ -123,35 +120,50 @@ func TestIssueFromLinear_Roundtrip(t *testing.T) {
 	assert.Equal(t, domain.IssueStateInProgress, got.State)
 	require.NotNil(t, got.Assignee)
 	assert.Equal(t, "Ada Lovelace", got.Assignee.Name)
-	assert.Equal(t, "ada", got.Assignee.Username)
+	// Email and Username are no longer populated — the new wire shape
+	// gives us only the display name. AssigneeID is captured on the
+	// wire type for future consumers but has no home on domain.Person.
+	assert.Empty(t, got.Assignee.Email)
+	assert.Empty(t, got.Assignee.Username)
 	assert.Equal(t, time.Date(2026, 5, 10, 0, 0, 0, 0, time.UTC), got.DueAt)
 	assert.False(t, got.UpdatedAt.IsZero())
 }
 
-func TestPersonFromLinear_Nil(t *testing.T) {
-	assert.Nil(t, personFromLinear(nil))
+func TestIssueFromLinear_AssigneeFromStringAndID(t *testing.T) {
+	li := linearIssue{
+		ID:         "ENG-1",
+		Title:      "test",
+		Assignee:   "Stephen Morgan",
+		AssigneeID: "861548d1-a0c1-4091-af9d-3f727b420fca",
+		StatusType: "started",
+	}
+	got := issueFromLinear(li)
+	require.NotNil(t, got.Assignee)
+	assert.Equal(t, "Stephen Morgan", got.Assignee.Name)
+	// domain.Person has no ID field; the UUID lives on linearIssue.
+	assert.Equal(t, "861548d1-a0c1-4091-af9d-3f727b420fca", li.AssigneeID)
 }
 
-func TestPersonFromLinear_PrefersUsernameOverHandle(t *testing.T) {
-	got := personFromLinear(&linearUser{Username: "ada", Handle: "ignored-handle"})
-	require.NotNil(t, got)
-	assert.Equal(t, "ada", got.Username)
+func TestIssueFromLinear_UnassignedLeavesAssigneeZero(t *testing.T) {
+	li := linearIssue{
+		ID:         "ENG-1",
+		Title:      "test",
+		StatusType: "backlog",
+	}
+	got := issueFromLinear(li)
+	assert.Nil(t, got.Assignee)
 }
 
-func TestPersonFromLinear_FallsBackToHandle(t *testing.T) {
-	got := personFromLinear(&linearUser{Handle: "ada"})
-	require.NotNil(t, got)
-	assert.Equal(t, "ada", got.Username)
+func TestPersonFromLinear_EmptyReturnsNil(t *testing.T) {
+	assert.Nil(t, personFromLinear(""))
 }
 
-func TestPersonFromLinear_PrefersNameOverDisplayName(t *testing.T) {
-	got := personFromLinear(&linearUser{Name: "Ada Lovelace", DisplayName: "ignored"})
+func TestPersonFromLinear_PopulatesName(t *testing.T) {
+	got := personFromLinear("Ada Lovelace")
 	require.NotNil(t, got)
 	assert.Equal(t, "Ada Lovelace", got.Name)
-}
-
-func TestPersonFromLinear_AllFieldsEmptyReturnsNil(t *testing.T) {
-	assert.Nil(t, personFromLinear(&linearUser{}))
+	assert.Empty(t, got.Email)
+	assert.Empty(t, got.Username)
 }
 
 func TestParseDueDate(t *testing.T) {
