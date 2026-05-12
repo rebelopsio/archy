@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"path/filepath"
 	"testing"
 	"time"
@@ -230,6 +231,54 @@ func TestRunDaily_GatherFailure(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "linear unreachable")
 	assert.Empty(t, runtime.calls)
+}
+
+// Failure path: gather fails → no claim is taken, next run can retry.
+func TestRunDaily_GatherFailureLeavesNoClaim(t *testing.T) {
+	deps, gatherer, runtime, _ := fixtureDeps(t)
+	gatherer.err = errors.New("linear unreachable")
+
+	_, err := runDaily(context.Background(), deps, dailyOptions{})
+	require.Error(t, err)
+	assert.Empty(t, runtime.calls)
+
+	now := deps.now()
+	key := fmt.Sprintf("daily-brief:%s", now.Format("2006-01-02"))
+	has, err := deps.store.IdempotencyHas(context.Background(), key)
+	require.NoError(t, err)
+	assert.False(t, has, "failed gather must not take an idempotency claim")
+}
+
+// Failure path: agent run fails → no claim is taken.
+func TestRunDaily_AgentFailureLeavesNoClaim(t *testing.T) {
+	deps, gatherer, runtime, _ := fixtureDeps(t)
+	gatherer.issues = []domain.Issue{{Ref: domain.ExternalRef{Provider: "linear", ID: "X"}, Title: "x"}}
+	runtime.err = errors.New("agent SDK exploded")
+
+	_, err := runDaily(context.Background(), deps, dailyOptions{})
+	require.Error(t, err)
+
+	now := deps.now()
+	key := fmt.Sprintf("daily-brief:%s", now.Format("2006-01-02"))
+	has, err := deps.store.IdempotencyHas(context.Background(), key)
+	require.NoError(t, err)
+	assert.False(t, has, "failed agent run must not take an idempotency claim")
+}
+
+// Success path: claim is taken AFTER the agent run.
+func TestRunDaily_SuccessTakesClaim(t *testing.T) {
+	deps, gatherer, runtime, _ := fixtureDeps(t)
+	gatherer.issues = []domain.Issue{{Ref: domain.ExternalRef{Provider: "linear", ID: "X"}, Title: "x"}}
+
+	_, err := runDaily(context.Background(), deps, dailyOptions{})
+	require.NoError(t, err)
+	require.Len(t, runtime.calls, 1)
+
+	now := deps.now()
+	key := fmt.Sprintf("daily-brief:%s", now.Format("2006-01-02"))
+	has, err := deps.store.IdempotencyHas(context.Background(), key)
+	require.NoError(t, err)
+	assert.True(t, has, "successful run must take an idempotency claim")
 }
 
 func TestBuildDailyPrompt_IncludesFields(t *testing.T) {

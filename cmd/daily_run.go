@@ -97,24 +97,28 @@ type dailyResult struct {
 // runDaily orchestrates a daily-brief execution. The caller wires
 // production deps; tests inject fakes. Behavior:
 //
-//  1. Idempotency claim under the run's date key (skipped on dry-run).
+//  1. Check for a prior idempotency claim under the run's date key;
+//     skip when one exists (skipped entirely on dry-run).
 //  2. Gather issues via deps.issueGatherer.
 //  3. Build a GatherContext and drive the renderer.
 //  4. Dry-run: print body to stdout and return.
 //  5. Real run: invoke the agent with a prompt that includes the body
 //     and target path. The agent calls archy_write_vault_note.
+//  6. Only after the agent run succeeds: take the idempotency claim.
+//     Failures before this point leave no claim, so the next attempt
+//     can retry without manual intervention.
 func runDaily(ctx context.Context, deps dailyDeps, opts dailyOptions) (dailyResult, error) {
 	now := deps.now()
 	date := now.Format("2006-01-02")
 	targetPath := filepath.Join(deps.cfg.Vault.Folders.Daily, date+".md")
+	key := fmt.Sprintf("daily-brief:%s", date)
 
 	if !opts.DryRun {
-		key := fmt.Sprintf("daily-brief:%s", date)
-		fresh, err := deps.store.IdempotencyClaim(ctx, key, now)
+		has, err := deps.store.IdempotencyHas(ctx, key)
 		if err != nil {
-			return dailyResult{}, fmt.Errorf("daily: idempotency claim: %w", err)
+			return dailyResult{}, fmt.Errorf("daily: idempotency check: %w", err)
 		}
-		if !fresh {
+		if has {
 			return dailyResult{
 				Skipped:    true,
 				SkipReason: "today's brief has already been generated",
@@ -168,6 +172,15 @@ func runDaily(ctx context.Context, deps dailyDeps, opts dailyOptions) (dailyResu
 	})
 	if err != nil {
 		return dailyResult{}, fmt.Errorf("daily: agent run: %w", err)
+	}
+
+	// Claim is taken only after the agent run returns success, so a
+	// failed gather/render/agent invocation leaves no claim behind and
+	// the next archy daily can retry. A "false" fresh result here is
+	// benign and only reachable via --force on a date with a prior
+	// claim (which the caller cleared just before this run started).
+	if _, err := deps.store.IdempotencyClaim(ctx, key, now); err != nil {
+		return dailyResult{}, fmt.Errorf("daily: idempotency claim: %w", err)
 	}
 
 	return dailyResult{
