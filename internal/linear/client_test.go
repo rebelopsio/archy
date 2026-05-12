@@ -3,6 +3,8 @@ package linear
 import (
 	"context"
 	"errors"
+	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -202,11 +204,47 @@ func TestUnmarshalIssues_Garbage(t *testing.T) {
 	require.Error(t, err)
 }
 
-func TestUnmarshalIssues_GarbageIncludesBodyInError(t *testing.T) {
+func TestUnmarshalIssues_GarbageIncludesBothErrorsInMessage(t *testing.T) {
 	_, err := unmarshalIssues([]byte(`{"surprise":"new shape"}`))
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "neither a wrapped object nor a bare array")
+	assert.Contains(t, err.Error(), "did not parse as a known shape")
+	assert.Contains(t, err.Error(), "wrapped:")
+	assert.Contains(t, err.Error(), "bare:")
 	assert.Contains(t, err.Error(), `{"surprise":"new shape"}`)
+}
+
+func TestUnmarshalIssues_FieldMismatchSurfacesWrappedError(t *testing.T) {
+	// `priority` is supposed to decode into *linearPriority (an object),
+	// but here we send it as a bare integer. The wrapped decode will
+	// fail with a type-mismatch error; we want that error visible.
+	b := []byte(`{"issues":[{"id":"ENG-1","priority":1}]}`)
+	_, err := unmarshalIssues(b)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "wrapped:")
+	// The Go json package's error message for this case includes
+	// "cannot unmarshal number into Go" or similar; assert the
+	// substring "cannot unmarshal" which is stable across versions.
+	assert.Contains(t, err.Error(), "cannot unmarshal")
+}
+
+func TestUnmarshalIssues_DumpsFullBodyOnFailure(t *testing.T) {
+	body := []byte(`{"surprise":"new shape"}`)
+	_, err := unmarshalIssues(body)
+	require.Error(t, err)
+
+	// Extract the dump path from the error message. The message format
+	// is stable: "...; full body written to <path>".
+	msg := err.Error()
+	const marker = "full body written to "
+	idx := strings.Index(msg, marker)
+	require.GreaterOrEqual(t, idx, 0, "error should mention the dump path: %s", msg)
+	path := strings.TrimSpace(msg[idx+len(marker):])
+
+	t.Cleanup(func() { _ = os.Remove(path) })
+
+	got, readErr := os.ReadFile(path)
+	require.NoError(t, readErr)
+	assert.Equal(t, body, got)
 }
 
 func TestUnmarshalIssues_LongBodyTruncated(t *testing.T) {
@@ -219,10 +257,12 @@ func TestUnmarshalIssues_LongBodyTruncated(t *testing.T) {
 
 	_, err := unmarshalIssues(body)
 	require.Error(t, err)
+	assert.Contains(t, err.Error(), "did not parse as a known shape")
 	assert.Contains(t, err.Error(), "more bytes")
-	// The error message should be bounded; assert it doesn't contain the
-	// full payload by checking length.
-	assert.Less(t, len(err.Error()), 700)
+	// The inline preview must remain bounded — the message can grow
+	// from the decode-error strings and the temp-file path, but the
+	// 700-byte payload must not be inlined in full.
+	assert.NotContains(t, err.Error(), strings.Repeat("x", 600))
 }
 
 func TestTruncate(t *testing.T) {
