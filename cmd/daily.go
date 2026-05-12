@@ -42,6 +42,7 @@ const dailyTemplateName = "daily.yaml"
 
 var (
 	dailyDryRun     bool
+	dailyForce      bool
 	dailyConfigPath string
 )
 
@@ -62,6 +63,7 @@ the agent or writing to the vault.`,
 
 func init() {
 	dailyCmd.Flags().BoolVar(&dailyDryRun, "dry-run", false, "render the brief to stdout without writing or invoking the agent")
+	dailyCmd.Flags().BoolVar(&dailyForce, "force", false, "regenerate today's brief even if it has already been written")
 	dailyCmd.Flags().StringVar(&dailyConfigPath, "config", "", "config file path (default: $XDG_CONFIG_HOME/archy/config.yaml)")
 	rootCmd.AddCommand(dailyCmd)
 }
@@ -137,7 +139,7 @@ func runDailyCommand(cmd *cobra.Command, _ []string) error {
 		stdout:        cmd.OutOrStdout(),
 	}
 
-	res, err := runDaily(ctx, deps, dailyOptions{DryRun: dailyDryRun})
+	res, err := runDaily(ctx, deps, dailyOptions{DryRun: dailyDryRun, Force: dailyForce})
 	if err != nil {
 		return err
 	}

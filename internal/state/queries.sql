@@ -50,6 +50,12 @@ INSERT INTO idempotency (key, claimed_at)
 VALUES (?, ?)
 ON CONFLICT(key) DO NOTHING;
 
+-- name: IdempotencyHas :one
+SELECT EXISTS(SELECT 1 FROM idempotency WHERE key = ?) AS has_claim;
+
+-- name: IdempotencyClear :exec
+DELETE FROM idempotency WHERE key = ?;
+
 -- Explanation --
 
 -- name: ExplanationPut :exec
