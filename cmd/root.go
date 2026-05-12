@@ -21,6 +21,8 @@ import (
 	"os"
 
 	"github.com/spf13/cobra"
+
+	"github.com/rebelopsio/archy/internal/version"
 )
 
 // rootCmd is the entry point for the archy binary. Subcommands register
@@ -39,12 +41,17 @@ Configuration lives at $XDG_CONFIG_HOME/archy/config.yaml (or
 is kept in a SQLite database under $XDG_DATA_HOME/archy/state.db.
 
 See https://github.com/rebelopsio/archy for documentation.`,
+	// Version enables cobra's built-in --version flag. The custom
+	// template strips cobra's default "archy version " prefix so
+	// `archy --version` produces the same output as `archy version`.
+	Version: version.String(),
 }
 
 // Execute runs the archy CLI. It is called by main.main() and exits the
 // process with a non-zero status if a subcommand returns an error.
 // Cobra prints the error itself before returning.
 func Execute() {
+	rootCmd.SetVersionTemplate("{{.Version}}\n")
 	if err := rootCmd.Execute(); err != nil {
 		os.Exit(1)
 	}
