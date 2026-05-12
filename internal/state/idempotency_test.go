@@ -44,3 +44,55 @@ func TestIdempotency_DifferentKeysIndependent(t *testing.T) {
 	require.NoError(t, err)
 	assert.True(t, ok)
 }
+
+func TestIdempotencyHas_FreshKey(t *testing.T) {
+	s := openTestStore(t)
+	has, err := s.IdempotencyHas(context.Background(), "daily-brief:2026-05-10")
+	require.NoError(t, err)
+	assert.False(t, has)
+}
+
+func TestIdempotencyHas_ClaimedKey(t *testing.T) {
+	s := openTestStore(t)
+	ctx := context.Background()
+	_, err := s.IdempotencyClaim(ctx, "daily-brief:2026-05-10", time.Now())
+	require.NoError(t, err)
+
+	has, err := s.IdempotencyHas(ctx, "daily-brief:2026-05-10")
+	require.NoError(t, err)
+	assert.True(t, has)
+}
+
+func TestIdempotencyClear_RemovesClaim(t *testing.T) {
+	s := openTestStore(t)
+	ctx := context.Background()
+	_, err := s.IdempotencyClaim(ctx, "daily-brief:2026-05-10", time.Now())
+	require.NoError(t, err)
+
+	require.NoError(t, s.IdempotencyClear(ctx, "daily-brief:2026-05-10"))
+
+	has, err := s.IdempotencyHas(ctx, "daily-brief:2026-05-10")
+	require.NoError(t, err)
+	assert.False(t, has)
+}
+
+func TestIdempotencyClear_AbsentKeyNoOp(t *testing.T) {
+	s := openTestStore(t)
+	require.NoError(t, s.IdempotencyClear(context.Background(), "daily-brief:never-existed"))
+}
+
+func TestIdempotencyClear_AllowsReclaim(t *testing.T) {
+	s := openTestStore(t)
+	ctx := context.Background()
+	key := "daily-brief:2026-05-10"
+
+	ok, err := s.IdempotencyClaim(ctx, key, time.Now())
+	require.NoError(t, err)
+	require.True(t, ok)
+
+	require.NoError(t, s.IdempotencyClear(ctx, key))
+
+	ok, err = s.IdempotencyClaim(ctx, key, time.Now())
+	require.NoError(t, err)
+	assert.True(t, ok, "claim should be fresh again after clear")
+}

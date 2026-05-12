@@ -308,3 +308,23 @@ func (q *Queries) IdempotencyClaim(ctx context.Context, arg IdempotencyClaimPara
 	}
 	return result.RowsAffected()
 }
+
+const idempotencyClear = `-- name: IdempotencyClear :exec
+DELETE FROM idempotency WHERE key = ?
+`
+
+func (q *Queries) IdempotencyClear(ctx context.Context, key string) error {
+	_, err := q.db.ExecContext(ctx, idempotencyClear, key)
+	return err
+}
+
+const idempotencyHas = `-- name: IdempotencyHas :one
+SELECT EXISTS(SELECT 1 FROM idempotency WHERE key = ?) AS has_claim
+`
+
+func (q *Queries) IdempotencyHas(ctx context.Context, key string) (int64, error) {
+	row := q.db.QueryRowContext(ctx, idempotencyHas, key)
+	var has_claim int64
+	err := row.Scan(&has_claim)
+	return has_claim, err
+}
