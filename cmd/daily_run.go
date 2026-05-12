@@ -72,6 +72,10 @@ type dailyOptions struct {
 	// DryRun renders the brief and prints it to deps.stdout without
 	// invoking the agent or writing to the vault.
 	DryRun bool
+	// Force causes runDaily to bypass the idempotency-has check and
+	// clear any prior claim for today, allowing regeneration of an
+	// already-written brief. Has no effect when DryRun is true.
+	Force bool
 }
 
 // dailyResult is what runDaily returns on success. The cobra wrapper
@@ -114,16 +118,22 @@ func runDaily(ctx context.Context, deps dailyDeps, opts dailyOptions) (dailyResu
 	key := fmt.Sprintf("daily-brief:%s", date)
 
 	if !opts.DryRun {
-		has, err := deps.store.IdempotencyHas(ctx, key)
-		if err != nil {
-			return dailyResult{}, fmt.Errorf("daily: idempotency check: %w", err)
-		}
-		if has {
-			return dailyResult{
-				Skipped:    true,
-				SkipReason: "today's brief has already been generated",
-				TargetPath: targetPath,
-			}, nil
+		if opts.Force {
+			if err := deps.store.IdempotencyClear(ctx, key); err != nil {
+				return dailyResult{}, fmt.Errorf("daily: idempotency clear: %w", err)
+			}
+		} else {
+			has, err := deps.store.IdempotencyHas(ctx, key)
+			if err != nil {
+				return dailyResult{}, fmt.Errorf("daily: idempotency check: %w", err)
+			}
+			if has {
+				return dailyResult{
+					Skipped:    true,
+					SkipReason: "today's brief has already been generated",
+					TargetPath: targetPath,
+				}, nil
+			}
 		}
 	}
 
