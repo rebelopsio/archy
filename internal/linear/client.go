@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"os"
 	"sync"
 	"time"
 
@@ -222,13 +223,20 @@ func extractIssuesJSON(res *mcp.CallToolResult) ([]byte, error) {
 // wrapped first; if no wrapping field is set, fall through to bare.
 // Returns the parsed slice and never nil-but-no-error so callers can
 // distinguish "no issues" from "parse failed."
+//
+// On failure, both decode errors are surfaced in the message — a field-
+// level type mismatch typically shows up as a wrapped-decode error
+// while the bare-decode error confirms the shape isn't an array
+// either. The full response is dumped to a temp file (best-effort) so
+// the operator can inspect what Linear actually sent.
 func unmarshalIssues(b []byte) ([]linearIssue, error) {
 	var wrapped struct {
 		Issues  *[]linearIssue `json:"issues,omitempty"`
 		Data    *[]linearIssue `json:"data,omitempty"`
 		Results *[]linearIssue `json:"results,omitempty"`
 	}
-	if err := json.Unmarshal(b, &wrapped); err == nil {
+	wrappedErr := json.Unmarshal(b, &wrapped)
+	if wrappedErr == nil {
 		if wrapped.Issues != nil {
 			return *wrapped.Issues, nil
 		}
@@ -239,11 +247,21 @@ func unmarshalIssues(b []byte) ([]linearIssue, error) {
 			return *wrapped.Results, nil
 		}
 	}
+
 	var direct []linearIssue
-	if err := json.Unmarshal(b, &direct); err == nil {
+	directErr := json.Unmarshal(b, &direct)
+	if directErr == nil {
 		return direct, nil
 	}
-	return nil, fmt.Errorf("response was neither a wrapped object nor a bare array of issues; got: %s", truncate(b, 500))
+
+	dumpPath, dumpErr := dumpResponseBody(b)
+	msg := fmt.Sprintf("response did not parse as a known shape (wrapped: %v; bare: %v); first 500 bytes: %s", wrappedErr, directErr, truncate(b, 500))
+	if dumpErr == nil {
+		msg += fmt.Sprintf("; full body written to %s", dumpPath)
+	} else {
+		msg += fmt.Sprintf("; (failed to dump full body: %v)", dumpErr)
+	}
+	return nil, errors.New(msg)
 }
 
 // truncate returns b as a string, clipped to n bytes with a trailing
@@ -254,4 +272,23 @@ func truncate(b []byte, n int) string {
 		return string(b)
 	}
 	return string(b[:n]) + fmt.Sprintf("…(%d more bytes)", len(b)-n)
+}
+
+// dumpResponseBody writes the response body to a uniquely-named file
+// under os.TempDir() and returns the path. The file is left in place
+// for the operator to inspect; archy does not clean it up. Returns
+// an error only if the file cannot be created or written.
+func dumpResponseBody(b []byte) (string, error) {
+	f, err := os.CreateTemp("", "archy-linear-response-*.json")
+	if err != nil {
+		return "", fmt.Errorf("create temp file: %w", err)
+	}
+	if _, err := f.Write(b); err != nil {
+		_ = f.Close()
+		return "", fmt.Errorf("write temp file: %w", err)
+	}
+	if err := f.Close(); err != nil {
+		return "", fmt.Errorf("close temp file: %w", err)
+	}
+	return f.Name(), nil
 }
