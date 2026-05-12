@@ -3,6 +3,8 @@ package config
 import (
 	"errors"
 	"fmt"
+	"io"
+	"net/mail"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -12,6 +14,11 @@ import (
 
 	"github.com/spf13/viper"
 )
+
+// userOverrideWarnWriter is where deprecation warnings from
+// transitional ARCHY_USER_* env-var fallbacks are emitted. Production
+// uses os.Stderr; tests redirect to a buffer.
+var userOverrideWarnWriter io.Writer = os.Stderr
 
 // Config is archy's runtime configuration, loaded from YAML and validated.
 type Config struct {
@@ -29,6 +36,34 @@ type Config struct {
 	State StateConfig `mapstructure:"state"`
 	// Output controls how archy renders and writes its output.
 	Output OutputConfig `mapstructure:"output"`
+	// User identifies the operator across providers (Linear, GitHub,
+	// calendar, etc.) for scoring "is this me?" predicates.
+	User UserConfig `mapstructure:"user"`
+}
+
+// UserConfig describes the identifiers archy uses to recognize "the
+// operator" — the human archy is acting on behalf of — across providers.
+//
+// The transitional ARCHY_USER_EMAIL (singular) and ARCHY_USER_USERNAME
+// env vars are honored as deprecated fallbacks for one release and will
+// be removed after v0.3.0. Use ARCHY_USER_EMAILS, ARCHY_USER_LINEAR_HANDLE,
+// and ARCHY_USER_GITHUB_HANDLE going forward.
+type UserConfig struct {
+	// Emails is the operator's email addresses. The first entry is the
+	// primary, used for any single-value attribution. All entries are
+	// matched as "me" by scoring signals. Required: must contain at
+	// least one entry. Each entry must parse as an RFC 5322 address.
+	// Duplicates (case-insensitive) are deduped at validation time
+	// with first-occurrence-wins; order is preserved otherwise.
+	Emails []string `mapstructure:"emails"`
+
+	// LinearHandle is the operator's Linear username. Optional; may be
+	// empty when Linear is not enabled.
+	LinearHandle string `mapstructure:"linear_handle"`
+
+	// GitHubHandle is the operator's GitHub username. Optional; may be
+	// empty when GitHub is not enabled.
+	GitHubHandle string `mapstructure:"github_handle"`
 }
 
 // VaultConfig describes where archy writes notes and how its folders are
@@ -223,10 +258,12 @@ func newViper() *viper.Viper {
 // finalize unmarshals v into a Config, expands tildes in path-bearing
 // fields, and validates.
 func finalize(v *viper.Viper) (*Config, error) {
+	applyUserEnvOverrides(v)
 	var cfg Config
 	if err := v.Unmarshal(&cfg); err != nil {
 		return nil, fmt.Errorf("unmarshal config: %w", err)
 	}
+	normalizeUser(&cfg.User)
 	if err := expandConfigTildes(&cfg); err != nil {
 		return nil, err
 	}
@@ -234,6 +271,88 @@ func finalize(v *viper.Viper) (*Config, error) {
 		return nil, err
 	}
 	return &cfg, nil
+}
+
+// applyUserEnvOverrides resolves env-var overrides for the user.* keys.
+// Viper's AutomaticEnv handles scalar overrides for ARCHY_USER_LINEAR_HANDLE
+// and ARCHY_USER_GITHUB_HANDLE; ARCHY_USER_EMAILS is parsed here as
+// comma-separated and v.Set so it replaces the file value entirely.
+//
+// Two transitional fallbacks are honored for one release before being
+// removed after v0.3.0:
+//
+//   - ARCHY_USER_EMAIL — applied as a one-element override of user.emails
+//     when ARCHY_USER_EMAILS is unset.
+//   - ARCHY_USER_USERNAME — applied as user.linear_handle when neither
+//     ARCHY_USER_LINEAR_HANDLE nor ARCHY_USER_GITHUB_HANDLE is set. The
+//     previous code path used the same env var for both Linear and GitHub
+//     identity matching, which was already wrong; we are not perpetuating
+//     that.
+//
+// Each fallback that fires emits a single deprecation warning to
+// userOverrideWarnWriter (os.Stderr in production, a buffer in tests).
+func applyUserEnvOverrides(v *viper.Viper) {
+	if csv, ok := os.LookupEnv("ARCHY_USER_EMAILS"); ok {
+		v.Set("user.emails", splitCSVEnv(csv))
+	} else if old, ok := os.LookupEnv("ARCHY_USER_EMAIL"); ok {
+		_, _ = fmt.Fprintln(userOverrideWarnWriter,
+			"archy: ARCHY_USER_EMAIL is deprecated, use ARCHY_USER_EMAILS or the user.emails config field")
+		if trimmed := strings.TrimSpace(old); trimmed != "" {
+			v.Set("user.emails", []string{trimmed})
+		}
+	}
+
+	_, linearSet := os.LookupEnv("ARCHY_USER_LINEAR_HANDLE")
+	_, githubSet := os.LookupEnv("ARCHY_USER_GITHUB_HANDLE")
+	if !linearSet && !githubSet {
+		if old, ok := os.LookupEnv("ARCHY_USER_USERNAME"); ok {
+			_, _ = fmt.Fprintln(userOverrideWarnWriter,
+				"archy: ARCHY_USER_USERNAME is deprecated, use ARCHY_USER_LINEAR_HANDLE or ARCHY_USER_GITHUB_HANDLE")
+			v.Set("user.linear_handle", strings.TrimSpace(old))
+		}
+	}
+}
+
+// splitCSVEnv splits a comma-separated env value into a slice, trimming
+// whitespace around each entry and dropping empty entries. Returns nil
+// for an empty input string so callers can distinguish "unset" from
+// "empty list".
+func splitCSVEnv(s string) []string {
+	if s == "" {
+		return nil
+	}
+	parts := strings.Split(s, ",")
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		if t := strings.TrimSpace(p); t != "" {
+			out = append(out, t)
+		}
+	}
+	return out
+}
+
+// normalizeUser trims whitespace on each email entry and dedupes
+// case-insensitive, first-occurrence-wins. This runs before validation
+// so the validator sees the post-normalization slice.
+func normalizeUser(uc *UserConfig) {
+	if len(uc.Emails) == 0 {
+		return
+	}
+	seen := make(map[string]struct{}, len(uc.Emails))
+	out := make([]string, 0, len(uc.Emails))
+	for _, e := range uc.Emails {
+		t := strings.TrimSpace(e)
+		if t == "" {
+			continue
+		}
+		key := strings.ToLower(t)
+		if _, dup := seen[key]; dup {
+			continue
+		}
+		seen[key] = struct{}{}
+		out = append(out, t)
+	}
+	uc.Emails = out
 }
 
 // setDefaults registers archy's default values with v. The empty default
@@ -262,6 +381,11 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("output.timezone", "Local")
 	v.SetDefault("output.signature", true)
 	v.SetDefault("output.voice", true)
+	// Empty defaults so ARCHY_USER_* env-var overrides bind during
+	// Unmarshal, matching the vault.path precedent.
+	v.SetDefault("user.emails", []string{})
+	v.SetDefault("user.linear_handle", "")
+	v.SetDefault("user.github_handle", "")
 }
 
 // expandConfigTildes expands "~/" and bare "~" in the four path-bearing
@@ -323,8 +447,27 @@ func (c *Config) Validate() error {
 	c.validateScoring(&errs)
 	c.validateState(&errs)
 	c.validateOutput(&errs)
+	c.validateUser(&errs)
 
 	return errors.Join(errs...)
+}
+
+func (c *Config) validateUser(errs *[]error) {
+	if len(c.User.Emails) == 0 {
+		*errs = append(*errs, fmt.Errorf("user.emails is required (at least one entry): %w", ErrInvalidConfig))
+	} else {
+		for i, e := range c.User.Emails {
+			if _, err := mail.ParseAddress(e); err != nil {
+				*errs = append(*errs, fmt.Errorf("user.emails[%d] %q is not a valid email address: %w", i, e, ErrInvalidConfig))
+			}
+		}
+	}
+	if h := c.User.LinearHandle; h != "" && strings.ContainsAny(h, " \t\r\n") {
+		*errs = append(*errs, fmt.Errorf("user.linear_handle %q must not contain whitespace: %w", h, ErrInvalidConfig))
+	}
+	if h := c.User.GitHubHandle; h != "" && strings.ContainsAny(h, " \t\r\n") {
+		*errs = append(*errs, fmt.Errorf("user.github_handle %q must not contain whitespace: %w", h, ErrInvalidConfig))
+	}
 }
 
 func (c *Config) validateVault(errs *[]error) {

@@ -53,42 +53,53 @@ func TestPullRequest_IsBlockedOnUser(t *testing.T) {
 		},
 	}
 
-	t.Run("username-match", func(t *testing.T) {
-		assert.True(t, pr.IsBlockedOnUser(Person{Username: "ada"}))
+	t.Run("linear-handle-match", func(t *testing.T) {
+		me := MakeIdentity([]string{"u@e.com"}, "ada", "")
+		assert.True(t, pr.IsBlockedOnUser(me))
 	})
 
-	t.Run("username-case-sensitive", func(t *testing.T) {
-		assert.False(t, pr.IsBlockedOnUser(Person{Username: "Ada"}))
+	t.Run("github-handle-match", func(t *testing.T) {
+		me := MakeIdentity([]string{"u@e.com"}, "", "ada")
+		assert.True(t, pr.IsBlockedOnUser(me))
 	})
 
-	t.Run("email-match-when-username-missing", func(t *testing.T) {
-		// Person has no Username; reviewer Grace has no Username — fall back to email.
-		assert.True(t, pr.IsBlockedOnUser(Person{Email: "grace@example.com"}))
+	t.Run("handle-match-case-insensitive", func(t *testing.T) {
+		me := MakeIdentity([]string{"u@e.com"}, "ADA", "")
+		assert.True(t, pr.IsBlockedOnUser(me))
+	})
+
+	t.Run("email-match-when-reviewer-username-missing", func(t *testing.T) {
+		// Grace has no Username — fall back to email set membership.
+		me := MakeIdentity([]string{"grace@example.com"}, "", "")
+		assert.True(t, pr.IsBlockedOnUser(me))
 	})
 
 	t.Run("email-match-case-insensitive", func(t *testing.T) {
-		assert.True(t, pr.IsBlockedOnUser(Person{Email: "GRACE@EXAMPLE.COM"}))
+		me := MakeIdentity([]string{"GRACE@EXAMPLE.COM"}, "", "")
+		assert.True(t, pr.IsBlockedOnUser(me))
 	})
 
-	t.Run("name-not-used-for-match", func(t *testing.T) {
-		// Two people named Ada, but no username/email overlap.
-		other := Person{Name: "Ada Lovelace", Username: "different-ada"}
-		assert.False(t, pr.IsBlockedOnUser(other))
+	t.Run("alt-email-recognized", func(t *testing.T) {
+		me := MakeIdentity([]string{"primary@x.com", "grace@example.com"}, "", "")
+		assert.True(t, pr.IsBlockedOnUser(me))
 	})
 
-	t.Run("no-match", func(t *testing.T) {
-		assert.False(t, pr.IsBlockedOnUser(Person{Username: "alan"}))
+	t.Run("no-handles-and-no-email-match", func(t *testing.T) {
+		me := MakeIdentity([]string{"alan@example.com"}, "alan", "alan")
+		assert.False(t, pr.IsBlockedOnUser(me))
+	})
+
+	t.Run("reviewer-with-username-does-not-fall-through-to-email", func(t *testing.T) {
+		// ada has a username; even if we know ada's email, an Identity
+		// without a matching handle should NOT match this reviewer via
+		// email — once a reviewer has a Username, that's what we match on.
+		me := MakeIdentity([]string{"ada@example.com"}, "alan", "alan")
+		assert.False(t, pr.IsBlockedOnUser(me))
 	})
 
 	t.Run("empty-reviewers", func(t *testing.T) {
 		emptyPR := PullRequest{}
-		assert.False(t, emptyPR.IsBlockedOnUser(Person{Username: "ada"}))
-	})
-
-	t.Run("username-mismatch-does-not-fall-through-to-email", func(t *testing.T) {
-		// ada has username; querying with a different username + ada's
-		// email should NOT match: when both have usernames, only username
-		// counts.
-		assert.False(t, pr.IsBlockedOnUser(Person{Username: "alan", Email: "ada@example.com"}))
+		me := MakeIdentity([]string{"u@e.com"}, "ada", "")
+		assert.False(t, emptyPR.IsBlockedOnUser(me))
 	})
 }

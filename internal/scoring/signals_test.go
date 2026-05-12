@@ -15,9 +15,8 @@ var fixedNow = time.Date(2026, 5, 6, 12, 0, 0, 0, time.UTC)
 
 func baseCtx() Context {
 	return Context{
-		Now:          fixedNow,
-		UserEmail:    "user@example.com",
-		UserUsername: "user",
+		Now:  fixedNow,
+		User: domain.MakeIdentity([]string{"user@example.com"}, "user", "user"),
 	}
 }
 
@@ -84,7 +83,7 @@ func TestSignal_ReviewRequested_UsernameMatch(t *testing.T) {
 func TestSignal_ReviewRequested_EmailMatchWhenNoUsername(t *testing.T) {
 	pr := domain.PullRequest{RequestedReviewers: []domain.Person{{Email: "user@example.com"}}}
 	ctx := baseCtx()
-	ctx.UserUsername = "" // force email path
+	// Reviewer has only email; identity matches via email-set membership.
 	triggered, reason := signalReviewRequested(ctx, PullRequestItem{PR: pr})
 	assert.True(t, triggered)
 	assert.Equal(t, "review requested from you", reason)
@@ -270,14 +269,16 @@ func TestSignal_ExternalAttendees_Triggered(t *testing.T) {
 	assert.Equal(t, "has external attendees", reason)
 }
 
-func TestSignal_ExternalAttendees_NotTriggeredAllInternal(t *testing.T) {
+func TestSignal_ExternalAttendees_NotTriggeredAllAreOperator(t *testing.T) {
 	e := domain.CalendarEvent{Attendees: []domain.Person{
 		{Email: "user@example.com"},
-		{Email: "alice@example.com"},
+		{Email: "alt@personal.io"},
 	}}
-	triggered, reason := signalExternalAttendees(baseCtx(), CalendarEventItem{Event: e})
+	ctx := baseCtx()
+	ctx.User = domain.MakeIdentity([]string{"user@example.com", "alt@personal.io"}, "", "")
+	triggered, reason := signalExternalAttendees(ctx, CalendarEventItem{Event: e})
 	assert.False(t, triggered)
-	assert.Equal(t, "all attendees in your domain", reason)
+	assert.Equal(t, "all attendees recognized as you", reason)
 }
 
 func TestSignal_ExternalAttendees_NotTriggeredNoAttendees(t *testing.T) {
@@ -287,13 +288,15 @@ func TestSignal_ExternalAttendees_NotTriggeredNoAttendees(t *testing.T) {
 	assert.Equal(t, "no attendees", reason)
 }
 
-func TestSignal_ExternalAttendees_NotTriggeredUserEmailNoAt(t *testing.T) {
+func TestSignal_ExternalAttendees_NotTriggeredEmptyIdentity(t *testing.T) {
+	// With no emails configured on the operator, the signal cannot
+	// classify anyone as external — the predicate short-circuits to false.
 	e := domain.CalendarEvent{Attendees: []domain.Person{{Email: "alice@example.com"}}}
 	ctx := baseCtx()
-	ctx.UserEmail = "no-at-symbol"
+	ctx.User = domain.MakeIdentity(nil, "", "")
 	triggered, reason := signalExternalAttendees(ctx, CalendarEventItem{Event: e})
 	assert.False(t, triggered)
-	assert.Equal(t, "all attendees in your domain", reason)
+	assert.Equal(t, "all attendees recognized as you", reason)
 }
 
 // --- key_stakeholder ---

@@ -10,6 +10,7 @@ import (
 	claude "github.com/partio-io/claude-agent-sdk-go"
 
 	"github.com/rebelopsio/archy/internal/config"
+	"github.com/rebelopsio/archy/internal/domain"
 )
 
 // Runtime wraps the Claude Agent SDK Go for archy's use.
@@ -26,8 +27,8 @@ type Runtime struct {
 	closeOnce sync.Once
 }
 
-// Options configures a [Runtime]. UserEmail and UserUsername are
-// required; the rest have sensible defaults.
+// Options configures a [Runtime]. Config and User are required;
+// the rest have sensible defaults.
 type Options struct {
 	// Config is archy's loaded configuration. Required.
 	Config *config.Config
@@ -46,11 +47,11 @@ type Options struct {
 	// the SDK uses the current working directory when unset.
 	Cwd string
 
-	// UserEmail and UserUsername are passed through to the archy MCP
-	// server subprocess via environment variables. Required (the
-	// scoring engine needs them).
-	UserEmail    string
-	UserUsername string
+	// User identifies the operator across providers. Required: must
+	// have at least one email. Passed through to the archy MCP server
+	// subprocess via environment variables and used by the scoring
+	// engine.
+	User domain.Identity
 }
 
 // New constructs a [Runtime]. Returns [ErrSetup] (wrapped) when

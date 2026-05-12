@@ -27,6 +27,7 @@ import (
 
 	"github.com/rebelopsio/archy/internal/agent"
 	"github.com/rebelopsio/archy/internal/config"
+	"github.com/rebelopsio/archy/internal/domain"
 	"github.com/rebelopsio/archy/internal/linear"
 	"github.com/rebelopsio/archy/internal/render"
 	"github.com/rebelopsio/archy/internal/scoring"
@@ -101,21 +102,21 @@ func runDailyCommand(cmd *cobra.Command, _ []string) error {
 	}
 	defer func() { _ = gatherer.Close() }()
 
+	identity := domain.MakeIdentity(cfg.User.Emails, cfg.User.LinearHandle, cfg.User.GitHubHandle)
+
 	scorer := runScorer{
 		ctx: scoring.Context{
-			Now:          time.Now(),
-			UserEmail:    os.Getenv("ARCHY_USER_EMAIL"),
-			UserUsername: os.Getenv("ARCHY_USER_USERNAME"),
-			Weights:      weightsFromConfig(cfg.Scoring),
+			Now:     time.Now(),
+			User:    identity,
+			Weights: weightsFromConfig(cfg.Scoring),
 		},
 	}
 
 	var rt dailyRuntime
 	if !dailyDryRun {
 		rt, err = agent.New(agent.Options{
-			Config:       cfg,
-			UserEmail:    os.Getenv("ARCHY_USER_EMAIL"),
-			UserUsername: os.Getenv("ARCHY_USER_USERNAME"),
+			Config: cfg,
+			User:   identity,
 		})
 		if err != nil {
 			return fmt.Errorf("init agent runtime: %w", err)

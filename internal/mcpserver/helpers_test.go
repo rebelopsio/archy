@@ -5,6 +5,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/rebelopsio/archy/internal/domain"
 	"github.com/rebelopsio/archy/internal/scoring"
 	"github.com/rebelopsio/archy/internal/write"
 )
@@ -20,8 +21,7 @@ func newTestServer(t *testing.T) (*Server, string) {
 	srv, err := New(Config{
 		Writer:         w,
 		ScoringWeights: scoring.Weights{UrgentIssue: 8, OverdueIssue: 5, MeetingSoon: 3, ReviewRequested: 7, BlockedOnUser: 6, CIFailing: 4},
-		UserEmail:      "user@example.com",
-		UserUsername:   "user",
+		User:           domain.MakeIdentity([]string{"user@example.com"}, "user", "user"),
 	})
 	require.NoError(t, err)
 	return srv, dir

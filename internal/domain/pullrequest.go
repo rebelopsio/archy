@@ -1,9 +1,6 @@
 package domain
 
-import (
-	"strings"
-	"time"
-)
+import "time"
 
 // PullRequestState is the canonical lifecycle state of a pull request.
 type PullRequestState int
@@ -90,29 +87,29 @@ type PullRequest struct {
 	CIPassing *bool
 }
 
-// IsBlockedOnUser reports whether the given person appears in
-// RequestedReviewers — i.e., the PR is waiting on them.
+// IsBlockedOnUser reports whether the operator (identified by id)
+// appears in RequestedReviewers — i.e., the PR is waiting on them.
 //
 // Matching strategy, per requested reviewer:
-//   - If both person and reviewer have a non-empty Username, match by
-//     Username (case-sensitive).
-//   - Otherwise, if both have a non-empty Email, match by Email
-//     (case-insensitive).
+//   - If the reviewer has a non-empty Username, match against either
+//     id.LinearHandle or id.GitHubHandle (case-insensitive). The
+//     reviewer's username could come from either provider; either
+//     handle counts.
+//   - Otherwise, if the reviewer has a non-empty Email, match against
+//     id.Emails (case-insensitive set membership via id.MatchesEmail).
 //   - Otherwise that reviewer does not match.
 //
 // Name is never used for matching — two people can share a name.
-func (p PullRequest) IsBlockedOnUser(person Person) bool {
+func (p PullRequest) IsBlockedOnUser(id Identity) bool {
 	for _, r := range p.RequestedReviewers {
-		if person.Username != "" && r.Username != "" {
-			if person.Username == r.Username {
+		if r.Username != "" {
+			if id.MatchesLinearHandle(r.Username) || id.MatchesGitHubHandle(r.Username) {
 				return true
 			}
 			continue
 		}
-		if person.Email != "" && r.Email != "" {
-			if strings.EqualFold(person.Email, r.Email) {
-				return true
-			}
+		if r.Email != "" && id.MatchesEmail(r.Email) {
+			return true
 		}
 	}
 	return false

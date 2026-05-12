@@ -9,8 +9,14 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/rebelopsio/archy/internal/config"
+	"github.com/rebelopsio/archy/internal/domain"
 	"github.com/rebelopsio/archy/internal/mcpserver"
 )
+
+// testIdentity is a minimal valid Identity for buildOptions tests.
+func testIdentity() domain.Identity {
+	return domain.MakeIdentity([]string{"u@example.com"}, "u", "u")
+}
 
 // applyOpts runs the SDK option list against an empty config and
 // returns it for inspection. We can't read the SDK's internal config
@@ -33,8 +39,7 @@ func applyOpts(t *testing.T, opts []claude.Option) int {
 func TestBuildOptions_IncludesModelMaxTurnsPermission(t *testing.T) {
 	opts, err := buildOptions(baselineConfig(), Options{
 		ArchyBinaryPath: "/fake/archy",
-		UserEmail:       "u@e",
-		UserUsername:    "u",
+		User:            testIdentity(),
 	})
 	require.NoError(t, err)
 	// 4 base options (model, max-turns, permission, allowed-tools) + 1 archy MCP server = 5.
@@ -47,7 +52,7 @@ func TestBuildOptions_RegistersExternalEnabledMCPServer(t *testing.T) {
 	cfg.MCPServers = map[string]config.MCPServerConfig{
 		"linear": {URL: "https://mcp.linear.app/mcp", Enabled: true},
 	}
-	opts, err := buildOptions(cfg, Options{ArchyBinaryPath: "/fake/archy", UserEmail: "u@e", UserUsername: "u"})
+	opts, err := buildOptions(cfg, Options{ArchyBinaryPath: "/fake/archy", User: testIdentity()})
 	require.NoError(t, err)
 	assert.Equal(t, 6, applyOpts(t, opts), "5 base/archy + 1 external")
 }
@@ -57,7 +62,7 @@ func TestBuildOptions_SkipsDisabledExternalMCPServer(t *testing.T) {
 	cfg.MCPServers = map[string]config.MCPServerConfig{
 		"linear": {URL: "https://mcp.linear.app/mcp", Enabled: false},
 	}
-	opts, err := buildOptions(cfg, Options{ArchyBinaryPath: "/fake/archy", UserEmail: "u@e", UserUsername: "u"})
+	opts, err := buildOptions(cfg, Options{ArchyBinaryPath: "/fake/archy", User: testIdentity()})
 	require.NoError(t, err)
 	assert.Equal(t, 5, applyOpts(t, opts))
 }
@@ -67,23 +72,23 @@ func TestBuildOptions_ExternalServerBadScheme(t *testing.T) {
 	cfg.MCPServers = map[string]config.MCPServerConfig{
 		"weird": {URL: "ftp://nope", Enabled: true},
 	}
-	_, err := buildOptions(cfg, Options{ArchyBinaryPath: "/fake/archy", UserEmail: "u@e", UserUsername: "u"})
+	_, err := buildOptions(cfg, Options{ArchyBinaryPath: "/fake/archy", User: testIdentity()})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "unsupported scheme")
 }
 
 func TestBuildOptions_CLIPathOnlyAddedWhenSet(t *testing.T) {
-	withCLI, err := buildOptions(baselineConfig(), Options{ArchyBinaryPath: "/fake/archy", UserEmail: "u@e", UserUsername: "u", CLIPath: "/usr/local/bin/claude"})
+	withCLI, err := buildOptions(baselineConfig(), Options{ArchyBinaryPath: "/fake/archy", User: testIdentity(), CLIPath: "/usr/local/bin/claude"})
 	require.NoError(t, err)
-	withoutCLI, err := buildOptions(baselineConfig(), Options{ArchyBinaryPath: "/fake/archy", UserEmail: "u@e", UserUsername: "u"})
+	withoutCLI, err := buildOptions(baselineConfig(), Options{ArchyBinaryPath: "/fake/archy", User: testIdentity()})
 	require.NoError(t, err)
 	assert.Equal(t, len(withoutCLI)+1, len(withCLI))
 }
 
 func TestBuildOptions_CwdOnlyAddedWhenSet(t *testing.T) {
-	with, err := buildOptions(baselineConfig(), Options{ArchyBinaryPath: "/fake/archy", UserEmail: "u@e", UserUsername: "u", Cwd: "/some/dir"})
+	with, err := buildOptions(baselineConfig(), Options{ArchyBinaryPath: "/fake/archy", User: testIdentity(), Cwd: "/some/dir"})
 	require.NoError(t, err)
-	without, err := buildOptions(baselineConfig(), Options{ArchyBinaryPath: "/fake/archy", UserEmail: "u@e", UserUsername: "u"})
+	without, err := buildOptions(baselineConfig(), Options{ArchyBinaryPath: "/fake/archy", User: testIdentity()})
 	require.NoError(t, err)
 	assert.Equal(t, len(without)+1, len(with))
 }
