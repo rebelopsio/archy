@@ -42,9 +42,10 @@ func TestBuildOptions_IncludesModelMaxTurnsPermission(t *testing.T) {
 		User:            testIdentity(),
 	})
 	require.NoError(t, err)
-	// 4 base options (model, max-turns, permission, allowed-tools) + 1 archy MCP server = 5.
-	// External MCPs in baseline config = 0.
-	assert.Equal(t, 5, applyOpts(t, opts))
+	// 5 base options (model, max-turns, permission, allowed-tools,
+	// verbose) + 1 archy MCP server = 6. External MCPs in baseline
+	// config = 0.
+	assert.Equal(t, 6, applyOpts(t, opts))
 }
 
 func TestBuildOptions_RegistersExternalEnabledMCPServer(t *testing.T) {
@@ -54,7 +55,7 @@ func TestBuildOptions_RegistersExternalEnabledMCPServer(t *testing.T) {
 	}
 	opts, err := buildOptions(cfg, Options{ArchyBinaryPath: "/fake/archy", User: testIdentity()})
 	require.NoError(t, err)
-	assert.Equal(t, 6, applyOpts(t, opts), "5 base/archy + 1 external")
+	assert.Equal(t, 7, applyOpts(t, opts), "6 base/archy + 1 external")
 }
 
 func TestBuildOptions_SkipsDisabledExternalMCPServer(t *testing.T) {
@@ -64,7 +65,7 @@ func TestBuildOptions_SkipsDisabledExternalMCPServer(t *testing.T) {
 	}
 	opts, err := buildOptions(cfg, Options{ArchyBinaryPath: "/fake/archy", User: testIdentity()})
 	require.NoError(t, err)
-	assert.Equal(t, 5, applyOpts(t, opts))
+	assert.Equal(t, 6, applyOpts(t, opts))
 }
 
 func TestBuildOptions_ExternalServerBadScheme(t *testing.T) {

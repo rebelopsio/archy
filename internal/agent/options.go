@@ -37,6 +37,12 @@ func buildOptions(cfg *config.Config, opts Options) ([]claude.Option, error) {
 		claude.WithMaxTurns(cfg.Agent.MaxTurns),
 		claude.WithPermissionMode(cfg.Agent.PermissionMode),
 		claude.WithAllowedTools(allowedToolPattern...),
+		// Required by recent versions of the claude CLI when combined
+		// with --print and --output-format=stream-json — without it the
+		// subprocess exits immediately with "requires --verbose". The
+		// SDK passes through cfg.Verbose to the subprocess's --verbose
+		// flag; archy always wants this so we hardcode true.
+		claude.WithVerbose(true),
 	}
 	if opts.CLIPath != "" {
 		out = append(out, claude.WithCLIPath(opts.CLIPath))
