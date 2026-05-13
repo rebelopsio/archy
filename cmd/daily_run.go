@@ -205,7 +205,7 @@ func runDaily(ctx context.Context, deps dailyDeps, opts dailyOptions) (dailyResu
 		return dailyResult{}, fmt.Errorf(
 			"daily: agent claimed success but no file at %s: %w",
 			absPath,
-			explainToolCalls(runRes.ToolCalls, runRes.Text, statErr),
+			explainAgentOutcome(runRes, statErr),
 		)
 	}
 
@@ -217,17 +217,18 @@ func runDaily(ctx context.Context, deps dailyDeps, opts dailyOptions) (dailyResu
 	}, nil
 }
 
-// explainToolCalls returns an error summarizing what the agent did,
-// so the operator can diagnose why the expected file wasn't written.
-// agentText is the concatenated assistant output from the run;
-// truncated to keep the error message bounded.
-func explainToolCalls(calls []agent.ToolCallRecord, agentText string, statErr error) error {
+// explainAgentOutcome returns an error summarizing what the agent did
+// (and didn't do) so the operator can diagnose why the expected file
+// wasn't written. Surfaces tool calls, turns/duration/cost from the
+// SDK, and the agent's text output. Empty text is reported as
+// "<empty>" explicitly because it's a meaningful signal, not noise.
+func explainAgentOutcome(res *agent.RunResult, statErr error) error {
 	var b strings.Builder
-	if len(calls) == 0 {
+	if len(res.ToolCalls) == 0 {
 		fmt.Fprintf(&b, "agent made zero tool calls (stat: %v)", statErr)
 	} else {
-		fmt.Fprintf(&b, "agent made %d tool call(s):", len(calls))
-		for i, c := range calls {
+		fmt.Fprintf(&b, "agent made %d tool call(s):", len(res.ToolCalls))
+		for i, c := range res.ToolCalls {
 			outcome := "ok"
 			if c.Error != "" {
 				outcome = "error: " + c.Error
@@ -236,8 +237,12 @@ func explainToolCalls(calls []agent.ToolCallRecord, agentText string, statErr er
 		}
 		fmt.Fprintf(&b, "\n(stat: %v)", statErr)
 	}
-	if agentText != "" {
-		fmt.Fprintf(&b, "\nagent said: %s", truncateText(agentText, 1000))
+	fmt.Fprintf(&b, "\nturns=%d duration=%s cost_usd=%.6f",
+		res.Turns, res.Duration, res.CostUSD)
+	if res.Text != "" {
+		fmt.Fprintf(&b, "\nagent said: %s", truncateText(res.Text, 1000))
+	} else {
+		fmt.Fprintf(&b, "\nagent said: <empty>")
 	}
 	return errors.New(b.String())
 }

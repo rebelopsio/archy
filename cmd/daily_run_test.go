@@ -410,8 +410,9 @@ func TestRunDaily_VerifiesFileAfterRun(t *testing.T) {
 }
 
 // Missing file with no tool calls: error includes the path, the
-// "zero tool calls" call-out, and the stat error. Empty agent text
-// must not produce an "agent said:" line.
+// "zero tool calls" call-out, the stat error, the SDK signal line
+// (turns/duration/cost), and an explicit "<empty>" marker for the
+// missing text so the operator can tell signal from noise.
 func TestRunDaily_FailsLoudlyWhenFileMissing(t *testing.T) {
 	deps, gatherer, runtime, _ := fixtureDeps(t)
 	gatherer.issues = []domain.Issue{{Ref: domain.ExternalRef{Provider: "linear", ID: "ENG-1"}, Title: "x"}}
@@ -425,7 +426,8 @@ func TestRunDaily_FailsLoudlyWhenFileMissing(t *testing.T) {
 	msg := err.Error()
 	assert.Contains(t, msg, "no file at")
 	assert.Contains(t, msg, "zero tool calls")
-	assert.NotContains(t, msg, "agent said:", "empty text must not emit an agent-said line")
+	assert.Contains(t, msg, "turns=0")
+	assert.Contains(t, msg, "agent said: <empty>")
 }
 
 // Missing file with tool calls: every tool call's name and outcome
@@ -487,6 +489,28 @@ func TestRunDaily_AgentTextTruncated(t *testing.T) {
 	msg := err.Error()
 	assert.Contains(t, msg, "more chars")
 	assert.Less(t, len(msg), 2000, "error message should be bounded")
+}
+
+// Turns, duration, and cost from the SDK are surfaced so the operator
+// can tell whether the model was consulted at all when both tool
+// calls and text are empty.
+func TestRunDaily_MissingFileIncludesTurnsAndDuration(t *testing.T) {
+	deps, gatherer, runtime, _ := fixtureDeps(t)
+	gatherer.issues = []domain.Issue{{Ref: domain.ExternalRef{Provider: "linear", ID: "ENG-1"}, Title: "x"}}
+
+	runtime.result = &agent.RunResult{
+		Turns:    3,
+		Duration: 2500 * time.Millisecond,
+		CostUSD:  0.0042,
+	}
+
+	_, err := runDaily(context.Background(), deps, dailyOptions{})
+	require.Error(t, err)
+	msg := err.Error()
+	assert.Contains(t, msg, "turns=3")
+	assert.Contains(t, msg, "duration=2.5s")
+	assert.Contains(t, msg, "cost_usd=0.004200")
+	assert.Contains(t, msg, "agent said: <empty>")
 }
 
 func TestSummarizeToolCalls(t *testing.T) {
