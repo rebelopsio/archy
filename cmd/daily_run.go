@@ -205,7 +205,7 @@ func runDaily(ctx context.Context, deps dailyDeps, opts dailyOptions) (dailyResu
 		return dailyResult{}, fmt.Errorf(
 			"daily: agent claimed success but no file at %s: %w",
 			absPath,
-			explainToolCalls(runRes.ToolCalls, statErr),
+			explainToolCalls(runRes.ToolCalls, runRes.Text, statErr),
 		)
 	}
 
@@ -217,25 +217,40 @@ func runDaily(ctx context.Context, deps dailyDeps, opts dailyOptions) (dailyResu
 	}, nil
 }
 
-// explainToolCalls returns an error summarizing what tool calls the
-// agent made, so the operator can see whether the write tool was
-// invoked and how it responded. statErr is the underlying Stat error
-// when the expected file was missing.
-func explainToolCalls(calls []agent.ToolCallRecord, statErr error) error {
-	if len(calls) == 0 {
-		return fmt.Errorf("agent made zero tool calls (stat: %v)", statErr)
-	}
+// explainToolCalls returns an error summarizing what the agent did,
+// so the operator can diagnose why the expected file wasn't written.
+// agentText is the concatenated assistant output from the run;
+// truncated to keep the error message bounded.
+func explainToolCalls(calls []agent.ToolCallRecord, agentText string, statErr error) error {
 	var b strings.Builder
-	fmt.Fprintf(&b, "agent made %d tool call(s):", len(calls))
-	for i, c := range calls {
-		outcome := "ok"
-		if c.Error != "" {
-			outcome = "error: " + c.Error
+	if len(calls) == 0 {
+		fmt.Fprintf(&b, "agent made zero tool calls (stat: %v)", statErr)
+	} else {
+		fmt.Fprintf(&b, "agent made %d tool call(s):", len(calls))
+		for i, c := range calls {
+			outcome := "ok"
+			if c.Error != "" {
+				outcome = "error: " + c.Error
+			}
+			fmt.Fprintf(&b, "\n  [%d] %s — %s", i+1, c.Name, outcome)
 		}
-		fmt.Fprintf(&b, "\n  [%d] %s — %s", i+1, c.Name, outcome)
+		fmt.Fprintf(&b, "\n(stat: %v)", statErr)
 	}
-	fmt.Fprintf(&b, "\n(stat: %v)", statErr)
+	if agentText != "" {
+		fmt.Fprintf(&b, "\nagent said: %s", truncateText(agentText, 1000))
+	}
 	return errors.New(b.String())
+}
+
+// truncateText clips s to n chars and appends a "(N more chars)"
+// marker when truncated. Local to the cmd package because the
+// internal/linear truncate is package-private and only one caller
+// needs this here.
+func truncateText(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	return s[:n] + fmt.Sprintf("…(%d more chars)", len(s)-n)
 }
 
 // summarizeToolCalls returns a one-line description of the tool calls
