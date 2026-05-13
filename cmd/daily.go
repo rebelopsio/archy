@@ -150,7 +150,7 @@ func runDailyCommand(cmd *cobra.Command, _ []string) error {
 	case dailyDryRun:
 		// Body already printed by runDaily.
 	case res.AgentResult != nil:
-		_, _ = fmt.Fprintf(cmd.OutOrStdout(), "wrote %s\n", res.TargetPath)
+		_, _ = fmt.Fprintf(cmd.OutOrStdout(), "wrote %s (%s)\n", res.TargetPath, summarizeToolCalls(res.AgentResult.ToolCalls))
 	}
 	return nil
 }
