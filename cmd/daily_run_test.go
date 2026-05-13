@@ -491,6 +491,23 @@ func TestRunDaily_AgentTextTruncated(t *testing.T) {
 	assert.Less(t, len(msg), 2000, "error message should be bounded")
 }
 
+// Subprocess stderr captured by the SDK is surfaced in the
+// verification-failure error so the operator can see what claude
+// actually wrote before exiting.
+func TestRunDaily_VerificationErrorIncludesSubprocessStderr(t *testing.T) {
+	deps, gatherer, runtime, _ := fixtureDeps(t)
+	gatherer.issues = []domain.Issue{{Ref: domain.ExternalRef{Provider: "linear", ID: "X"}, Title: "x"}}
+
+	runtime.result = &agent.RunResult{
+		SubprocessStderr: "Error: unknown flag --bogus",
+	}
+
+	_, err := runDaily(context.Background(), deps, dailyOptions{})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "claude stderr:")
+	assert.Contains(t, err.Error(), "unknown flag --bogus")
+}
+
 // Turns, duration, and cost from the SDK are surfaced so the operator
 // can tell whether the model was consulted at all when both tool
 // calls and text are empty.
