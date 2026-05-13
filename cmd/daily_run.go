@@ -18,8 +18,10 @@ package cmd
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
+	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -193,12 +195,62 @@ func runDaily(ctx context.Context, deps dailyDeps, opts dailyOptions) (dailyResu
 		return dailyResult{}, fmt.Errorf("daily: idempotency claim: %w", err)
 	}
 
+	// Verify the file actually landed. The agent can report success
+	// without having invoked the write tool — surface that loudly with
+	// the list of tool calls the agent did make. The claim survives
+	// this failure on purpose; re-run with --force to retry.
+	absPath := filepath.Join(deps.cfg.Vault.Path, targetPath)
+	info, statErr := os.Stat(absPath)
+	if statErr != nil || info.Size() == 0 {
+		return dailyResult{}, fmt.Errorf(
+			"daily: agent claimed success but no file at %s: %w",
+			absPath,
+			explainToolCalls(runRes.ToolCalls, statErr),
+		)
+	}
+
 	return dailyResult{
 		Body:        body,
 		Frontmatter: res.Frontmatter,
 		TargetPath:  targetPath,
 		AgentResult: runRes,
 	}, nil
+}
+
+// explainToolCalls returns an error summarizing what tool calls the
+// agent made, so the operator can see whether the write tool was
+// invoked and how it responded. statErr is the underlying Stat error
+// when the expected file was missing.
+func explainToolCalls(calls []agent.ToolCallRecord, statErr error) error {
+	if len(calls) == 0 {
+		return fmt.Errorf("agent made zero tool calls (stat: %v)", statErr)
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "agent made %d tool call(s):", len(calls))
+	for i, c := range calls {
+		outcome := "ok"
+		if c.Error != "" {
+			outcome = "error: " + c.Error
+		}
+		fmt.Fprintf(&b, "\n  [%d] %s — %s", i+1, c.Name, outcome)
+	}
+	fmt.Fprintf(&b, "\n(stat: %v)", statErr)
+	return errors.New(b.String())
+}
+
+// summarizeToolCalls returns a one-line description of the tool calls
+// the agent made, suitable for the success-path "wrote <path>" line.
+// Zero tool calls is reported explicitly because it almost always
+// means the agent didn't do what was asked.
+func summarizeToolCalls(calls []agent.ToolCallRecord) string {
+	if len(calls) == 0 {
+		return "0 tool calls"
+	}
+	names := make([]string, len(calls))
+	for i, c := range calls {
+		names[i] = c.Name
+	}
+	return fmt.Sprintf("%d tool call(s): %s", len(calls), strings.Join(names, ", "))
 }
 
 // buildDailyPrompt is the prompt the daily-brief skill receives. Skill

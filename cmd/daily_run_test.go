@@ -21,6 +21,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -50,17 +51,24 @@ func (f *fakeIssueGatherer) GatherIssues(_ context.Context) ([]domain.Issue, err
 }
 
 // fakeDailyRuntime records every Run call and returns scripted results.
+// onRun, when set, fires after the request is recorded; tests use it
+// to simulate the side effects a real MCP server would have produced
+// (e.g., creating the file the post-run verification step expects).
 type fakeDailyRuntime struct {
 	calls   []agent.RunRequest
 	result  *agent.RunResult
 	err     error
 	closed  bool
 	prompts []string
+	onRun   func(req agent.RunRequest)
 }
 
 func (f *fakeDailyRuntime) Run(_ context.Context, req agent.RunRequest) (*agent.RunResult, error) {
 	f.calls = append(f.calls, req)
 	f.prompts = append(f.prompts, req.Prompt)
+	if f.onRun != nil {
+		f.onRun(req)
+	}
 	return f.result, f.err
 }
 
@@ -145,8 +153,25 @@ func fixtureDeps(t *testing.T) (dailyDeps, *fakeIssueGatherer, *fakeDailyRuntime
 	return deps, gatherer, runtime, stdout
 }
 
+// simulateAgentWrite wires runtime.onRun to actually create the file
+// runDaily's post-run verification expects, mimicking what a real MCP
+// archy_write_vault_note tool call would produce. Tests that exercise
+// the success path of a non-dry-run runDaily must call this so the
+// stat check finds the file.
+func simulateAgentWrite(t *testing.T, deps dailyDeps, runtime *fakeDailyRuntime) {
+	t.Helper()
+	date := deps.now().Format("2006-01-02")
+	rel := filepath.Join(deps.cfg.Vault.Folders.Daily, date+".md")
+	abs := filepath.Join(deps.cfg.Vault.Path, rel)
+	runtime.onRun = func(_ agent.RunRequest) {
+		require.NoError(t, os.MkdirAll(filepath.Dir(abs), 0o755))
+		require.NoError(t, os.WriteFile(abs, []byte("test brief\n"), 0o644))
+	}
+}
+
 func TestRunDaily_FixtureIssues_ProducesNonEmptyBody(t *testing.T) {
 	deps, gatherer, runtime, _ := fixtureDeps(t)
+	simulateAgentWrite(t, deps, runtime)
 	gatherer.issues = []domain.Issue{
 		{Ref: domain.ExternalRef{Provider: "linear", ID: "ENG-1"}, Title: "Fix the thing", Priority: domain.PriorityUrgent},
 		{Ref: domain.ExternalRef{Provider: "linear", ID: "SOC-2"}, Title: "Review checklist", Priority: domain.PriorityMedium},
@@ -206,6 +231,7 @@ func TestRunDaily_AgentRuntimeError_WrapsContext(t *testing.T) {
 
 func TestRunDaily_IdempotencyClaim_SecondCallSkips(t *testing.T) {
 	deps, gatherer, runtime, _ := fixtureDeps(t)
+	simulateAgentWrite(t, deps, runtime)
 	gatherer.issues = []domain.Issue{{Ref: domain.ExternalRef{Provider: "linear", ID: "X"}, Title: "x"}}
 
 	// First run: fresh claim, agent invoked.
@@ -268,6 +294,7 @@ func TestRunDaily_AgentFailureLeavesNoClaim(t *testing.T) {
 // Success path: claim is taken AFTER the agent run.
 func TestRunDaily_SuccessTakesClaim(t *testing.T) {
 	deps, gatherer, runtime, _ := fixtureDeps(t)
+	simulateAgentWrite(t, deps, runtime)
 	gatherer.issues = []domain.Issue{{Ref: domain.ExternalRef{Provider: "linear", ID: "X"}, Title: "x"}}
 
 	_, err := runDaily(context.Background(), deps, dailyOptions{})
@@ -284,6 +311,7 @@ func TestRunDaily_SuccessTakesClaim(t *testing.T) {
 // --force bypasses an existing claim and re-runs.
 func TestRunDaily_ForceIgnoresExistingClaim(t *testing.T) {
 	deps, gatherer, runtime, _ := fixtureDeps(t)
+	simulateAgentWrite(t, deps, runtime)
 	gatherer.issues = []domain.Issue{{Ref: domain.ExternalRef{Provider: "linear", ID: "X"}, Title: "x"}}
 
 	// First run: success, takes a claim.
@@ -301,6 +329,7 @@ func TestRunDaily_ForceIgnoresExistingClaim(t *testing.T) {
 // --force on a day with no prior claim still runs cleanly.
 func TestRunDaily_ForceWithoutPriorClaim(t *testing.T) {
 	deps, gatherer, runtime, _ := fixtureDeps(t)
+	simulateAgentWrite(t, deps, runtime)
 	gatherer.issues = []domain.Issue{{Ref: domain.ExternalRef{Provider: "linear", ID: "X"}, Title: "x"}}
 
 	res, err := runDaily(context.Background(), deps, dailyOptions{Force: true})
@@ -359,4 +388,68 @@ func TestBuildBlock_Unknown(t *testing.T) {
 	_, err := buildBlock(render.BlockSpec{Name: "made-up"})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "unknown block")
+}
+
+// Success path: when the agent actually creates the expected file,
+// the post-run verification passes and runDaily returns success.
+func TestRunDaily_VerifiesFileAfterRun(t *testing.T) {
+	deps, gatherer, runtime, _ := fixtureDeps(t)
+	gatherer.issues = []domain.Issue{{Ref: domain.ExternalRef{Provider: "linear", ID: "ENG-1"}, Title: "x"}}
+
+	simulateAgentWrite(t, deps, runtime)
+	runtime.result = &agent.RunResult{
+		ToolCalls: []agent.ToolCallRecord{
+			{Name: "mcp__archy__archy_write_vault_note"},
+		},
+	}
+
+	res, err := runDaily(context.Background(), deps, dailyOptions{})
+	require.NoError(t, err)
+	assert.NotNil(t, res.AgentResult)
+}
+
+// Missing file with no tool calls: error includes the path, the
+// "zero tool calls" call-out, and the stat error.
+func TestRunDaily_FailsLoudlyWhenFileMissing(t *testing.T) {
+	deps, gatherer, runtime, _ := fixtureDeps(t)
+	gatherer.issues = []domain.Issue{{Ref: domain.ExternalRef{Provider: "linear", ID: "ENG-1"}, Title: "x"}}
+
+	// Agent claims success but doesn't write anything.
+	runtime.result = &agent.RunResult{ToolCalls: nil}
+
+	_, err := runDaily(context.Background(), deps, dailyOptions{})
+	require.Error(t, err)
+	msg := err.Error()
+	assert.Contains(t, msg, "no file at")
+	assert.Contains(t, msg, "zero tool calls")
+}
+
+// Missing file with tool calls: every tool call's name and outcome
+// shows up in the error so the operator can see what happened.
+func TestRunDaily_MissingFileIncludesToolCallNames(t *testing.T) {
+	deps, gatherer, runtime, _ := fixtureDeps(t)
+	gatherer.issues = []domain.Issue{{Ref: domain.ExternalRef{Provider: "linear", ID: "ENG-1"}, Title: "x"}}
+
+	runtime.result = &agent.RunResult{
+		ToolCalls: []agent.ToolCallRecord{
+			{Name: "mcp__archy__archy_score_items"},
+			{Name: "Bash", Error: "command failed"},
+		},
+	}
+
+	_, err := runDaily(context.Background(), deps, dailyOptions{})
+	require.Error(t, err)
+	msg := err.Error()
+	assert.Contains(t, msg, "2 tool call")
+	assert.Contains(t, msg, "archy_score_items")
+	assert.Contains(t, msg, "Bash")
+	assert.Contains(t, msg, "command failed")
+}
+
+func TestSummarizeToolCalls(t *testing.T) {
+	assert.Equal(t, "0 tool calls", summarizeToolCalls(nil))
+	assert.Equal(t, "1 tool call(s): mcp__archy__archy_write_vault_note",
+		summarizeToolCalls([]agent.ToolCallRecord{{Name: "mcp__archy__archy_write_vault_note"}}))
+	assert.Equal(t, "2 tool call(s): a, b",
+		summarizeToolCalls([]agent.ToolCallRecord{{Name: "a"}, {Name: "b"}}))
 }
