@@ -41,8 +41,16 @@ type linearIssue struct {
 	// by archy except for diagnostics; carry through unchanged.
 	Status string `json:"status,omitempty"`
 
-	// Assignee is the person the issue is assigned to. Optional.
-	Assignee *linearUser `json:"assignee,omitempty"`
+	// Assignee is the human display name of the issue's assignee, as
+	// returned by Linear's MCP. Empty when unassigned. The stable
+	// identifier lives in AssigneeID.
+	Assignee string `json:"assignee,omitempty"`
+
+	// AssigneeID is the Linear user UUID of the assignee, paired with
+	// Assignee. Empty when unassigned. Not currently mapped into the
+	// domain layer (domain.Person has no ID field); kept on the wire
+	// type so future consumers can read it without another round-trip.
+	AssigneeID string `json:"assigneeId,omitempty"`
 
 	// DueDate is the due date in YYYY-MM-DD form, if set. Empty string
 	// means no due date.
@@ -58,18 +66,6 @@ type linearIssue struct {
 type linearPriority struct {
 	Value int    `json:"value"`
 	Name  string `json:"name,omitempty"`
-}
-
-// linearUser is the wire shape of a Linear user (assignee, creator,
-// etc.). Linear may not return all fields; populate what's present.
-type linearUser struct {
-	Name        string `json:"name,omitempty"`
-	DisplayName string `json:"displayName,omitempty"`
-	Email       string `json:"email,omitempty"`
-	// Username may also appear as `handle` or be missing entirely.
-	// Try both.
-	Username string `json:"username,omitempty"`
-	Handle   string `json:"handle,omitempty"`
 }
 
 // issueFromLinear converts a Linear-shaped issue to [domain.Issue].
@@ -163,34 +159,17 @@ func stateFromLinear(statusType string) domain.IssueState {
 	}
 }
 
-// personFromLinear converts a Linear user object into a
-// [*domain.Person]. Returns nil when the input is nil so the domain
-// type's "absent" semantic is preserved.
-//
-// Linear may name the user handle either "username" or "handle"
-// depending on how the MCP server formats responses; we accept both
-// and prefer "username" when both are populated.
-func personFromLinear(u *linearUser) *domain.Person {
-	if u == nil {
+// personFromLinear builds a [*domain.Person] from Linear's display
+// name string. Returns nil when displayName is empty so the domain
+// type's "absent" semantic is preserved. Linear's MCP no longer
+// returns nested user objects with email/username; the stable user
+// UUID is captured on linearIssue.AssigneeID but has no home on
+// domain.Person.
+func personFromLinear(displayName string) *domain.Person {
+	if displayName == "" {
 		return nil
 	}
-	username := u.Username
-	if username == "" {
-		username = u.Handle
-	}
-	name := u.Name
-	if name == "" {
-		name = u.DisplayName
-	}
-	p := &domain.Person{
-		Name:     name,
-		Email:    u.Email,
-		Username: username,
-	}
-	if p.IsZero() {
-		return nil
-	}
-	return p
+	return &domain.Person{Name: displayName}
 }
 
 // parseDueDate parses a YYYY-MM-DD string into a time.Time at midnight
