@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -409,23 +410,27 @@ func TestRunDaily_VerifiesFileAfterRun(t *testing.T) {
 }
 
 // Missing file with no tool calls: error includes the path, the
-// "zero tool calls" call-out, and the stat error.
+// "zero tool calls" call-out, and the stat error. Empty agent text
+// must not produce an "agent said:" line.
 func TestRunDaily_FailsLoudlyWhenFileMissing(t *testing.T) {
 	deps, gatherer, runtime, _ := fixtureDeps(t)
 	gatherer.issues = []domain.Issue{{Ref: domain.ExternalRef{Provider: "linear", ID: "ENG-1"}, Title: "x"}}
 
-	// Agent claims success but doesn't write anything.
-	runtime.result = &agent.RunResult{ToolCalls: nil}
+	// Agent claims success but doesn't write anything and produces
+	// no text either.
+	runtime.result = &agent.RunResult{ToolCalls: nil, Text: ""}
 
 	_, err := runDaily(context.Background(), deps, dailyOptions{})
 	require.Error(t, err)
 	msg := err.Error()
 	assert.Contains(t, msg, "no file at")
 	assert.Contains(t, msg, "zero tool calls")
+	assert.NotContains(t, msg, "agent said:", "empty text must not emit an agent-said line")
 }
 
 // Missing file with tool calls: every tool call's name and outcome
-// shows up in the error so the operator can see what happened.
+// shows up in the error so the operator can see what happened. With
+// non-empty text, the agent-said line appears too.
 func TestRunDaily_MissingFileIncludesToolCallNames(t *testing.T) {
 	deps, gatherer, runtime, _ := fixtureDeps(t)
 	gatherer.issues = []domain.Issue{{Ref: domain.ExternalRef{Provider: "linear", ID: "ENG-1"}, Title: "x"}}
@@ -435,6 +440,7 @@ func TestRunDaily_MissingFileIncludesToolCallNames(t *testing.T) {
 			{Name: "mcp__archy__archy_score_items"},
 			{Name: "Bash", Error: "command failed"},
 		},
+		Text: "I attempted the score step but bash failed.",
 	}
 
 	_, err := runDaily(context.Background(), deps, dailyOptions{})
@@ -444,6 +450,43 @@ func TestRunDaily_MissingFileIncludesToolCallNames(t *testing.T) {
 	assert.Contains(t, msg, "archy_score_items")
 	assert.Contains(t, msg, "Bash")
 	assert.Contains(t, msg, "command failed")
+	assert.Contains(t, msg, "agent said:")
+	assert.Contains(t, msg, "I attempted the score step")
+}
+
+// Zero tool calls + agent text: the diagnostic must include what
+// the agent actually said so the operator can see why no tool was
+// invoked.
+func TestRunDaily_MissingFileIncludesAgentText(t *testing.T) {
+	deps, gatherer, runtime, _ := fixtureDeps(t)
+	gatherer.issues = []domain.Issue{{Ref: domain.ExternalRef{Provider: "linear", ID: "ENG-1"}, Title: "x"}}
+
+	runtime.result = &agent.RunResult{
+		ToolCalls: nil,
+		Text:      "I cannot access any tools that would let me write to your vault.",
+	}
+
+	_, err := runDaily(context.Background(), deps, dailyOptions{})
+	require.Error(t, err)
+	msg := err.Error()
+	assert.Contains(t, msg, "zero tool calls")
+	assert.Contains(t, msg, "agent said:")
+	assert.Contains(t, msg, "cannot access any tools")
+}
+
+// Long agent text is truncated so the error message stays bounded.
+func TestRunDaily_AgentTextTruncated(t *testing.T) {
+	deps, gatherer, runtime, _ := fixtureDeps(t)
+	gatherer.issues = []domain.Issue{{Ref: domain.ExternalRef{Provider: "linear", ID: "ENG-1"}, Title: "x"}}
+
+	long := strings.Repeat("x", 1200)
+	runtime.result = &agent.RunResult{Text: long}
+
+	_, err := runDaily(context.Background(), deps, dailyOptions{})
+	require.Error(t, err)
+	msg := err.Error()
+	assert.Contains(t, msg, "more chars")
+	assert.Less(t, len(msg), 2000, "error message should be bounded")
 }
 
 func TestSummarizeToolCalls(t *testing.T) {
