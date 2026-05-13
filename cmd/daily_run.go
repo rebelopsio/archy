@@ -244,6 +244,9 @@ func explainAgentOutcome(res *agent.RunResult, statErr error) error {
 	} else {
 		fmt.Fprintf(&b, "\nagent said: <empty>")
 	}
+	if res.SubprocessStderr != "" {
+		fmt.Fprintf(&b, "\nclaude stderr: %s", truncateText(res.SubprocessStderr, 2000))
+	}
 	return errors.New(b.String())
 }
 

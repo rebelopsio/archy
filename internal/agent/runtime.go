@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"fmt"
+	"io"
 	"iter"
 	"os"
 	"sync"
@@ -22,6 +23,11 @@ type Runtime struct {
 	// runner constructs a [claude.Session], calls Send, and returns
 	// the iter.Seq2 yielded by Stream.
 	runner runner
+
+	// stderrLog is where the agent writes operational diagnostic lines
+	// (SDK invocation summary, subprocess stderr). Defaults to
+	// os.Stderr; tests override with io.Discard or a buffer.
+	stderrLog io.Writer
 
 	// closeOnce guards Close from being called multiple times.
 	closeOnce sync.Once
@@ -75,9 +81,10 @@ func New(opts Options) (*Runtime, error) {
 	}
 
 	return &Runtime{
-		cfg:    opts.Config,
-		opts:   opts,
-		runner: realRunner{},
+		cfg:       opts.Config,
+		opts:      opts,
+		runner:    realRunner{},
+		stderrLog: os.Stderr,
 	}, nil
 }
 

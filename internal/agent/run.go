@@ -4,10 +4,15 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
+	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	claude "github.com/partio-io/claude-agent-sdk-go"
+
+	"github.com/rebelopsio/archy/internal/config"
 )
 
 // RunRequest describes a single skill execution.
@@ -45,6 +50,10 @@ type RunResult struct {
 	// CostUSD is the model's reported cost for this run, if available.
 	// Zero means unknown.
 	CostUSD float64
+	// SubprocessStderr is everything the claude CLI subprocess wrote
+	// to its stderr during this run, joined newline-per-callback.
+	// Empty when the subprocess produced no stderr output.
+	SubprocessStderr string
 }
 
 // ToolCallRecord is one tool invocation observed during a run.
@@ -85,6 +94,23 @@ func (r *Runtime) Run(ctx context.Context, req RunRequest) (*RunResult, error) {
 	}
 	opts = append(opts, claude.WithAppendSystemPrompt(systemPromptAddition(req)))
 
+	// Capture the claude CLI subprocess's stderr so silent-failure
+	// modes (subprocess exits before consulting the model) surface
+	// the underlying error. The callback fires from the SDK's drain
+	// goroutine, so guard the buffer with a mutex.
+	var (
+		stderrMu  sync.Mutex
+		stderrBuf strings.Builder
+	)
+	opts = append(opts, claude.WithStderrCallback(func(line string) {
+		stderrMu.Lock()
+		defer stderrMu.Unlock()
+		stderrBuf.WriteString(line)
+		stderrBuf.WriteByte('\n')
+	}))
+
+	logSDKInvocation(r.stderrLog, r.cfg, r.opts, opts, req)
+
 	emit := func(ev ProgressEvent) {
 		if req.ProgressFn != nil {
 			req.ProgressFn(ev)
@@ -95,6 +121,14 @@ func (r *Runtime) Run(ctx context.Context, req RunRequest) (*RunResult, error) {
 	emit(ProgressEvent{Kind: ProgressStart, At: start})
 
 	res := &RunResult{}
+	// readStderr returns the captured subprocess output. Called on
+	// every return path so RunResult.SubprocessStderr is always
+	// populated (empty when nothing was written).
+	readStderr := func() string {
+		stderrMu.Lock()
+		defer stderrMu.Unlock()
+		return stderrBuf.String()
+	}
 	pending := make(map[string]*ToolCallRecord) // tool_use_id → in-flight record
 	var assistantText strings.Builder
 	systemSeen := false
@@ -104,6 +138,11 @@ func (r *Runtime) Run(ctx context.Context, req RunRequest) (*RunResult, error) {
 			emit(ProgressEvent{Kind: ProgressEnd, Message: "error: " + err.Error(), At: time.Now()})
 			if ctx.Err() != nil && (errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)) {
 				return nil, fmt.Errorf("agent run canceled: %w", ctx.Err())
+			}
+			// Surface the subprocess stderr alongside the SDK error so
+			// the operator sees what claude actually said before exiting.
+			if s := readStderr(); s != "" {
+				return nil, fmt.Errorf("%w: %v (claude stderr: %s)", ErrRun, err, s)
 			}
 			return nil, fmt.Errorf("%w: %v", ErrRun, err)
 		}
@@ -143,6 +182,7 @@ func (r *Runtime) Run(ctx context.Context, req RunRequest) (*RunResult, error) {
 				emit(ProgressEvent{Kind: ProgressEnd, Message: endMsg, At: time.Now()})
 				res.Text = assistantText.String()
 				res.Duration = time.Since(start)
+				res.SubprocessStderr = readStderr()
 				return res, fmt.Errorf("%w: %s", ErrRun, endMsg)
 			}
 		}
@@ -150,8 +190,37 @@ func (r *Runtime) Run(ctx context.Context, req RunRequest) (*RunResult, error) {
 
 	res.Text = assistantText.String()
 	res.Duration = time.Since(start)
+	res.SubprocessStderr = readStderr()
 	emit(ProgressEvent{Kind: ProgressEnd, Message: "completed", At: time.Now()})
 	return res, nil
+}
+
+// logSDKInvocation writes a one-time summary of the agent invocation
+// to w. This is the last thing archy controls before subprocess
+// handoff; if claude exits without consulting the model, the answer
+// is almost certainly in what we passed it. Secrets (bearer tokens,
+// auth headers) are never logged.
+func logSDKInvocation(w io.Writer, cfg *config.Config, opts Options, sdkOpts []claude.Option, req RunRequest) {
+	mcpEnabled := []string{}
+	for name, srv := range cfg.MCPServers {
+		if srv.Enabled {
+			mcpEnabled = append(mcpEnabled, name)
+		}
+	}
+	sort.Strings(mcpEnabled)
+
+	_, _ = fmt.Fprintln(w, "archy agent invocation:")
+	_, _ = fmt.Fprintf(w, "  skill=%s\n", req.SkillName)
+	_, _ = fmt.Fprintf(w, "  model=%s\n", cfg.Agent.Model)
+	_, _ = fmt.Fprintf(w, "  max_turns=%d\n", cfg.Agent.MaxTurns)
+	_, _ = fmt.Fprintf(w, "  permission_mode=%s\n", cfg.Agent.PermissionMode)
+	_, _ = fmt.Fprintf(w, "  cwd=%s\n", opts.Cwd)
+	_, _ = fmt.Fprintf(w, "  cli_path=%s\n", opts.CLIPath)
+	_, _ = fmt.Fprintf(w, "  archy_binary=%s\n", opts.ArchyBinaryPath)
+	_, _ = fmt.Fprintf(w, "  sdk_option_count=%d\n", len(sdkOpts))
+	_, _ = fmt.Fprintf(w, "  mcp_servers_enabled=%v\n", mcpEnabled)
+	_, _ = fmt.Fprintf(w, "  skills_project_dir=%s\n", cfg.Skills.ProjectDir)
+	_, _ = fmt.Fprintf(w, "  skills_user_dir=%s\n", cfg.Skills.UserDir)
 }
 
 // systemPromptAddition is the one-line skill-invocation instruction the

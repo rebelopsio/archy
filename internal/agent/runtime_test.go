@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"errors"
+	"io"
 	"iter"
 	"testing"
 	"time"
@@ -54,6 +55,8 @@ func (f *fakeRunner) run(ctx context.Context, prompt string, opts []claude.Optio
 
 // newTestRuntime returns a Runtime with a baseline-valid config and a
 // substituted fake runner. The caller drives the fakeRunner's messages.
+// stderrLog is replaced with io.Discard to keep test output quiet —
+// the invocation log fires on every Run.
 func newTestRuntime(t *testing.T, fr *fakeRunner) *Runtime {
 	t.Helper()
 	rt, err := New(Options{
@@ -63,6 +66,7 @@ func newTestRuntime(t *testing.T, fr *fakeRunner) *Runtime {
 	})
 	require.NoError(t, err)
 	rt.runner = fr
+	rt.stderrLog = io.Discard
 	return rt
 }
 
